@@ -35,6 +35,9 @@ HandleType_t g_PluginEntityFactoryHandle;
 
 CPluginEntityFactories* g_pPluginEntityFactories = new CPluginEntityFactories();
 
+extern IForward* g_pForwardOnCBaseNPCInitialized;
+extern bool		 m_bInitialized;
+
 class EntityMemAllocHook_t
 {
 private:
@@ -107,6 +110,9 @@ public:
 } g_EntityMemAllocHook;
 
 CPluginEntityFactories::CPluginEntityFactories()
+	: m_FactoryType(0),
+	  m_fwdInstalledFactory(nullptr),
+	  m_fwdUninstalledFactory(nullptr)
 {
 }
 
@@ -208,6 +214,13 @@ bool CPluginEntityFactories::Init( IGameConfig* config, char* error, size_t maxl
 	m_FactoryType = g_PluginEntityFactoryHandle = handlesys->CreateType( "PluginEntityFactory", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr );
 	if ( !m_FactoryType )
 	{
+		for (int hookId : m_hookIds)
+		{
+			SH_REMOVE_HOOK_ID(hookId);
+		}
+		m_hookIds.clear();
+		m_gameFactories.clear();
+
 		snprintf( error, maxlength, "Failed to register PluginEntityFactory handle type" );
 		return false;
 	}
@@ -336,6 +349,12 @@ void CPluginEntityFactories::SDK_OnAllLoaded()
 	SH_MANUALHOOK_RECONFIGURE(FactoryEntity_GetDataDescMap, CBaseEntity::offset_GetDataDescMap, 0, 0);
 	SH_MANUALHOOK_RECONFIGURE(FactoryEntity_UpdateOnRemove, CBaseEntity::offset_UpdateOnRemove, 0, 0);
 	SH_MANUALHOOK_RECONFIGURE(EntityRecord_MyNextBotPointer, CBaseEntity::offset_MyNextBotPointer, 0, 0);
+
+	//now plugins can safely create new classes
+	if (g_pForwardOnCBaseNPCInitialized && m_bInitialized)
+	{
+		g_pForwardOnCBaseNPCInitialized->Execute(nullptr);
+	}
 }
 
 void CPluginEntityFactories::OnCoreMapEnd()
@@ -346,15 +365,25 @@ void CPluginEntityFactories::SDK_OnUnload()
 {
 	g_EntityMemAllocHook.Shutdown();
 
+	for (int hookId : m_hookIds)
+	{
+		SH_REMOVE_HOOK_ID(hookId);
+	}
+	m_hookIds.clear();
+
 	for (int i = 0; i < m_Factories.Count(); i++)
 	{
 		m_Factories[i]->Uninstall();
 	}
 
 	handlesys->RemoveType( m_FactoryType, myself->GetIdentity() );
+	m_FactoryType = 0;
+	g_PluginEntityFactoryHandle = 0;
 
 	forwards->ReleaseForward( m_fwdInstalledFactory );
 	forwards->ReleaseForward( m_fwdUninstalledFactory );
+	m_fwdInstalledFactory = nullptr;
+	m_fwdUninstalledFactory = nullptr;
 
 	plsys->RemovePluginsListener( this );
 }

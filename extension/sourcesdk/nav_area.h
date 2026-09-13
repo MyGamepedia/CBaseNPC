@@ -275,14 +275,7 @@ class CNavArea : protected CNavAreaCriticalData
 		NavDirType ComputeDirection( Vector *point ) const;
 
 		//- hiding spots ------------------------------------------------------------------------------------
-		const HidingSpotVector* GetHidingSpots(void) const
-		{
-		#if SOURCE_ENGINE == SE_BMS
-			return reinterpret_cast<const HidingSpotVector*>(reinterpret_cast<const uint8_t*>(this) + 0xCC);
-		#else
-			return &m_hidingSpots;
-		#endif
-		}
+		const HidingSpotVector* GetHidingSpots(void) const	{ return &m_hidingSpots; }
 
 		//- "danger" ----------------------------------------------------------------------------------------
 		virtual float GetDangerDecayRate( void ) const = 0;				// return danger decay rate per second
@@ -401,6 +394,13 @@ class CNavArea : protected CNavAreaCriticalData
 		unsigned int m_debugid;
 
 		Place m_place;												// place descriptor
+
+#if SOURCE_ENGINE == SE_BMS && !defined(PLATFORM_64BITS)
+		static_assert(
+			sizeof(CountdownTimer) == 0x0C,
+			"BMS CNavArea layout requires the SDK-compatible CountdownTimer ABI"
+		);
+#endif
 
 		CountdownTimer m_blockedTimer;								// Throttle checks on our blocked state while blocked
 		void UpdateBlockedFromNavBlockers( void );					// checks if nav blockers are still blocking the area

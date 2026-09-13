@@ -189,12 +189,8 @@ bool CBaseEntity::Init(SourceMod::IGameConfig* config, char* error, size_t maxle
 		return false;  
 	}
 
-	// Any entity that inherits CBaseEntity is good 
-#if SOURCE_ENGINE == SE_BMS  
-	BEGIN_VAR("trigger_auto_crouch");
-#else  
-	BEGIN_VAR("trigger_stun");  
-#endif
+	// Any entity that inherits CBaseEntity is good.
+	BEGIN_VAR("trigger");
 	OFFSETVAR_DATA(CBaseEntity, m_pfnThink);
 	OFFSETVAR_DATA(CBaseEntity, m_iClassname);
 	OFFSETVAR_DATA(CBaseEntity, m_nModelIndex);
@@ -803,7 +799,7 @@ void CBaseEntity::SetLocalAngles(const QAngle& angles)
 	}
 }
 
-void CBaseEntity::SDK_OnUnload()
+void CBaseEntity::Unload()
 {
 #ifndef __linux__
     if (g_pSimThink_EntityChangedDetour != nullptr)

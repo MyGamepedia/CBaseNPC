@@ -321,7 +321,7 @@ cell_t GetDamageForForceCalc(IPluginContext* context, const cell_t* params) {
 	return sp_ftoc(info->GetDamageForForceCalc());
 #else
 	return context->ThrowNativeError(
-		"CTakeDamageInfo.GetDamageForForceCalc is only supported in TF2."
+		"Not supported for this mod."
 	);
 #endif
 }
@@ -337,7 +337,7 @@ cell_t SetDamageForForceCalc(IPluginContext* context, const cell_t* params) {
 	return 0;
 #else
 	return context->ThrowNativeError(
-		"CTakeDamageInfo.SetDamageForForceCalc is only supported in TF2."
+		"Not supported for this mod."
 	);
 #endif
 }

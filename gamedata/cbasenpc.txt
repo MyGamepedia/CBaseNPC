@@ -4,21 +4,6 @@
 	{
 		"Offsets"
 		{
-			"framesnapshotmanager"
-			{
-				"windows"   "15"
-			}
-			// Locate CNavMesh::Load, first dword is TheNavMesh second is TheNavAreas
-			"TheNavMesh"
-			{
-				"linux"		"813"
-				"windows"	"481"
-			}
-			"TheNavAreas"
-			{
-				"linux"		"1201"
-				"windows"	"687"
-			}
 			// Locate CBaseEntity::PhysicsMarkEntitiesAsTouching, first dword is g_TouchTrace
 			"g_TouchTrace"
 			{
@@ -164,29 +149,9 @@
 				"linux"		"111"
 				"windows"	"111"
 			}
-			"framesnapshotmanager_indirect"
-			{
-				"windows" "0"
-			}
-			"framesnapshotmanager_ptr_offset"
-			{
-				"windows" "4"
-			}
 		}
 		"Signatures"
 		{
-			"CFrameSnapshotManager::AddExplicitDelete"
-			{
-				"library"   "engine"
-				"windows"   "\x55\x8B\xEC\x83\xEC\x20\x53\x56\x57\x6A\x01"
-				"linux"     "@_ZN21CFrameSnapshotManager17AddExplicitDeleteEi"
-			}
-			"framesnapshotmanager"
-			{
-				"library"  "engine"
-				"windows"  "\x56\xC6\x81\x06\x02\x00\x00\x00"
-				"linux"    "@framesnapshotmanager"
-			}
 			// Find string "Missing command string" which is used by nb_command
 			// nb_command calls TheNextBots()
 			"TheNextBots"
@@ -379,7 +344,33 @@
 			}
 		}
 		"Addresses"
-		{		
+		{
+			"TheNavMesh"
+			{
+				"windows"
+				{
+					"signature"	"CNavMesh::Load"
+					"read"		"481"
+				}
+				"linux"
+				{
+					"signature"	"CNavMesh::Load"
+					"read"		"813"
+				}
+			}
+			"TheNavAreas"
+			{
+				"windows"
+				{
+					"signature"	"CNavMesh::Load"
+					"read"		"687"
+				}
+				"linux"
+				{
+					"signature"	"CNavMesh::Load"
+					"read"		"1201"
+				}
+			}
 			"GetAnimationEvent"
 			{
 				"windows"
@@ -400,19 +391,6 @@
 	{
 		"Offsets"
 		{
-			"framesnapshotmanager"
-			{
-				"windows"   "2"
-			}
-			// Locate CNavMesh::Load, first dword is TheNavMesh second is TheNavAreas
-			"TheNavMesh"
-			{
-				"windows"	"960"
-			}
-			"TheNavAreas"
-			{
-				"windows"	"1103"
-			}
 			// Locate CBaseEntity::PhysicsMarkEntitiesAsTouching, first dword is g_TouchTrace
 			"g_TouchTrace"
 			{
@@ -574,31 +552,9 @@
 				"linux"		"111"
 				"windows"	"110"
 			}
-			"framesnapshotmanager_indirect"
-			{
-				"windows" "1"
-			}
-			"framesnapshotmanager_ptr_offset"
-			{
-				"windows" "0"
-			}
 		}
 		"Signatures"
 		{
-			//how to find: Find ED_Alloc(int*) by string ''ED_Alloc( %d ) - invalid edict index specified.'', 
-			//one of the funcs it calls is what you need
-			"CFrameSnapshotManager::AddExplicitDelete"
-			{
-				"library"   "engine"
-				"windows"   "\x55\x8B\xEC\x53\x8B\xD9\x56\x57\x8D\xB3\x9C\x80\x00\x00\xFF\x15\x2A\x2A\x2A\x2A\x8B\xF8\x3B\x3E\x74\x1B\x8B\xD7\x33\xC0\xF0\x0F\xB1\x16"
-				"linux"     "@_ZN21CFrameSnapshotManager17AddExplicitDeleteEi"
-			}
-			"framesnapshotmanager"
-			{
-				"library"  "engine"
-				"windows"  "\x8B\x0D\x2A\x2A\x2A\x2A\x56\xE8\x2A\x2A\x2A\x2A\xFF\x0D\x2A\x2A\x2A\x2A\xB8\x01\x00\x00\x00"
-				"linux"    "@framesnapshotmanager"
-			}
 			// Find string "Missing command string" which is used by nb_command
 			// nb_command calls TheNextBots()
 			"TheNextBots"
@@ -751,14 +707,6 @@
 				"windows"		"\x55\x8B\xEC\x57\x8B\x7D\x08\x85\xFF\x75\x07\x33\xC0\x5F\x5D\xC2\x08\x00\x8B\xCF\xE8\x2A\x2A\x2A\x2A\x84\xC0\x74\xEE\x53\x56\x8B\xCF\x33\xF6\xE8\x2A\x2A\x2A\x2A\x85\xC0\x7E\x2A\x8B\x5D\x0C"
 				"linux"			"@_ZN14CBaseAnimating19LookupPoseParameterEP10CStudioHdrPKc"
 			}
-			//how to find: find by string ''CBaseAnimating::SequenceDuration''
-			//IS IN VIRTUAL TABLE FOR BM!!!!
-			"CBaseAnimating::SequenceDuration"
-			{
-				"library"		"server"
-				"windows"		"\x55\x8B\xEC\x56\x8B\x75\x08\x57\x8B\xF9\x85\xF6\x75\x2D\x8B\x47\x5C\xB9\x2A\x2A\x2A\x2A\x85\xC0\x0F\x45\xC8\x51\xFF\x75\x0C\x68\x2A\x2A\x2A\x2A\x6A\x02\xFF\x15\x2A\x2A\x2A\x2A\xD9\x05\x2A\x2A\x2A\x2A\x83\xC4\x10\x5F\x5E\x5D\xC2\x08\x00\x8B\xCE\xE8\x2E\xF8"
-				"linux"			"@_ZN14CBaseAnimating16SequenceDurationEP10CStudioHdri"
-			}
 			// Go to data xref of string "ResetSequence : %s: %s -> %s\n"
 			"CBaseAnimating::ResetSequence"
 			{
@@ -807,7 +755,33 @@
 			}
 		}
 		"Addresses"
-		{		
+		{
+			"TheNavMesh"
+			{
+				"windows"
+				{
+					"signature"	"CNavMesh::Load"
+					"read"		"960"
+				}
+				// GCC's PIC CNavMesh::Load does not reference this global.
+				"linux"
+				{
+					"signature"	"TheNavMesh_Linux"
+				}
+			}
+			"TheNavAreas"
+			{
+				"windows"
+				{
+					"signature"	"CNavMesh::Load"
+					"read"		"1103"
+				}
+				// GCC's PIC CNavMesh::Load does not reference this global.
+				"linux"
+				{
+					"signature"	"TheNavAreas_Linux"
+				}
+			}
 			"GetAnimationEvent" 
 			{
 				"windows"

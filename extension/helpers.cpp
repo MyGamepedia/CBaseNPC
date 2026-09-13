@@ -3,18 +3,6 @@
 
 extern IServerTools *servertools;
 
-int nothing;
-
-IPluginFunction *GetFunctionByNameEx(IPluginContext *pContext, const char *name)
-{
-	if (!pContext || !name)
-	{
-		return nullptr;
-	}
-
-	return pContext->GetRuntime()->GetFunctionByName(name);
-}
-
 void MatrixToPawnMatrix(IPluginContext* context, cell_t* matAddr, const matrix3x4_t& mat)
 {
 	for ( int r = 0; r < 3; r++ )

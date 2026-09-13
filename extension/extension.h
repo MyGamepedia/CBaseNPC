@@ -63,6 +63,15 @@ class CBaseNPCExt : public SDKExtension, public ISMEntityListener, public IConCo
 			//virtual bool SDK_OnMetamodUnload(char *error, size_t maxlength);
 			//virtual bool SDK_OnMetamodPauseChange(bool paused, char *error, size_t maxlength);
 		#endif
+
+	bool Initialize(char* error, size_t maxlength); //load all offsets and stuff here, when server is ready, in case it isn't
+
+private:
+	//initialize hooks and offsets when server is ready in case it isn't, fired only once
+	bool Hook_LevelInit(const char* pMapName, const char* pMapEntities, const char* pOldLevel, const char* pLandmarkName, bool loadGame, bool background);
+	void TestDummyNPC(); //check if we got all needed interfaces
+
+	int m_iLevelInitHookID = 0;
 };
 
 #endif

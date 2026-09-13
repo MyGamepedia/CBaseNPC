@@ -15,10 +15,10 @@
 #include "baseentityoutput.h"
 #include "pluginentityfactory.h"
 #include "cbasenpc_behavior.h"
-#include "serialrefresher.h"
 
 class CTakeDamageInfoHack;
 SH_DECL_MANUALEXTERN1_void(MEvent_Killed, CTakeDamageInfoHack &);
+SH_DECL_HOOK6(IServerGameDLL, LevelInit, SH_NOATTRIB, 0, bool, const char *, const char *, const char *, const char *, bool, bool);
 
 CGlobalVars* gpGlobals = nullptr;
 IGameConfig* g_pGameConf = nullptr;
@@ -62,8 +62,12 @@ CBaseNPCExt g_CBaseNPCExt;
 SMEXT_LINK(&g_CBaseNPCExt);
 
 IForward *g_pForwardEventKilled = nullptr;
+IForward *g_pForwardOnCBaseNPCInitialized = nullptr;
+
 bool (ToolsTraceFilterSimple:: *ToolsTraceFilterSimple::func_ShouldHitEntity)(IHandleEntity *pHandleEntity, int contentsMask) = nullptr;
 CUtlMap<int32_t, int32_t> g_EntitiesHooks;
+
+bool m_bInitialized = false;
 
 bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	char conf_error[255];
@@ -74,46 +78,24 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 
 	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 
-	if (!CBaseEntity::Init(g_pGameConf, error, maxlength)
-		|| !CBaseAnimating::Init(g_pGameConf, error, maxlength)
-		|| !CBaseAnimatingOverlay::Init(g_pGameConf, error, maxlength)
-		|| !CFuncBrush::Init(g_pGameConf, error, maxlength)
-		|| !CBaseToggle::Init(g_pGameConf, error, maxlength)
-		|| !CNavMesh::Init(g_pGameConf, error, maxlength)
-		|| !CBaseCombatCharacter::Init(g_pGameConf, error, maxlength)
-		|| !ToolsTraceFilterSimple::Init(g_pGameConf, error, maxlength)
-#if SOURCE_ENGINE == SE_TF2  
-        || !CTFGameRules::Init(g_pGameConf, error, maxlength)  
-#endif  
-		|| !CBaseEntityOutput::Init(g_pGameConf, error, maxlength)
-		|| !CBaseNPC_Locomotion::Init(g_pGameConf, error, maxlength)
-		|| !ToolsNextBot::Init(g_pGameConf, error, maxlength)
-		|| !Tools_Refresh_Init(g_pGameConf, error, maxlength)
-		)
+	if (engine->GetEntityCount() < 1)
 	{
-		// Some initialization stages install detours before all later
-		// stages have succeeded. Roll them back before SourceMod unloads
-		// the extension DLL.
-		CNavMesh::SDK_OnUnload();
-		CBaseEntity::SDK_OnUnload();
-		return false;
-	}
+		m_iLevelInitHookID = SH_ADD_HOOK(IServerGameDLL, LevelInit, gamedll, SH_MEMBER(this,&CBaseNPCExt::Hook_LevelInit), false);
 
-	if ( !g_pPluginEntityFactories->Init( g_pGameConf, error, maxlength ) ) {
-		return false;
+		g_pSM->LogMessage(myself, "No edicts yet, CBaseNPC will load data in LevelInit.");
 	}
-
-	if ( !g_pBaseNPCPluginActionFactories->Init( g_pGameConf, error, maxlength ) ) {
+	else if (!Initialize(error, maxlength))
+	{
 		return false;
 	}
 
 	g_pForwardEventKilled = forwards->CreateForward("CBaseCombatCharacter_EventKilled", ET_Event, 9, nullptr, Param_Cell, Param_CellByRef, Param_CellByRef, Param_FloatByRef, Param_CellByRef, Param_CellByRef, Param_Array, Param_Array, Param_Cell);
-	g_pBaseNPCFactory = new CBaseNPCFactory;
-	
+	g_pForwardOnCBaseNPCInitialized = forwards->CreateForward("OnCBaseNPCInitialized", ET_Ignore, 0, nullptr, Param_Cell);
+
 	int iOffset = 0;
 	GETGAMEDATAOFFSET("CBaseEntity::Event_Killed", iOffset);
 	SH_MANUALHOOK_RECONFIGURE(MEvent_Killed, iOffset, 0, 0);
-	
+
 	CREATEHANDLETYPE(AreasCollector);
 
 	sharesys->AddDependency(myself, "bintools.ext", true, true);
@@ -236,30 +218,12 @@ void CBaseNPCExt::SDK_OnAllLoaded() {
 
 	g_pEntityList = (CBaseEntityList *)gamehelpers->GetGlobalEntityList();
 
-	g_pPluginEntityFactories->SDK_OnAllLoaded();
-
-	CBaseNPC_Entity* npc = static_cast<CBaseNPC_Entity*>(servertools->CreateEntityByName("base_npc"));
-	if (npc) {
-		if (npc->GetNPC()->GetID() == INVALID_NPC_ID) {
-			g_pSM->LogError(myself, "Dummy NPC has no id!");
-		}
-
-		if (npc->MyNextBotPointer() == nullptr) {
-			g_pSM->LogError(myself, "Dummy NPC has no nextbot interface!");
-		}
-
-		if (npc->GetNPC()->m_pMover == nullptr || npc->MyNextBotPointer()->GetLocomotionInterface() == nullptr) {
-			g_pSM->LogError(myself, "Dummy NPC has no locomotion interface!");
-		}
-		
-		if (npc->GetNPC()->m_pBody == nullptr || npc->MyNextBotPointer()->GetBodyInterface() == nullptr) {
-			g_pSM->LogError(myself, "Dummy NPC has no body interface!");
-		}
-
-		servertools->RemoveEntityImmediate(npc);
-		g_pSM->LogMessage(myself, "Successfully created & destroyed dummy NPC");
-	} else {
-		g_pSM->LogError(myself, "Failed to create dummy NPC!");
+	//avoid "ED_Alloc: No edicts yet" for SourceMod forks with early load support
+	//CPluginEntityFactories::SDK_OnAllLoaded() in this case also should not run here
+	if (m_bInitialized)
+	{
+		g_pPluginEntityFactories->SDK_OnAllLoaded();
+		TestDummyNPC();
 	}
 }
 
@@ -296,29 +260,175 @@ void CBaseNPCExt::NotifyInterfaceDrop(SMInterface* interface) {
 
 void CBaseNPCExt::SDK_OnUnload()
 {
-	CNavMesh::SDK_OnUnload();
-    CBaseEntity::SDK_OnUnload();
-	
-	gameconfs->CloseGameConfigFile(g_pGameConf);
-	forwards->ReleaseForward(g_pForwardEventKilled);
+	if (m_iLevelInitHookID != 0)
+	{
+		SH_REMOVE_HOOK_ID(m_iLevelInitHookID);
+		m_iLevelInitHookID = 0;
+	}
 
-	Tools_Refresh_Shutdown();
+	if (m_bInitialized)
+	{
+		CNavMesh::Unload();
+		CBaseEntity::Unload();
 
-	g_pBaseNPCPluginActionFactories->SDK_OnUnload();
-	g_pPluginEntityFactories->SDK_OnUnload();
+		if (g_pForwardEventKilled)
+		{
+			forwards->ReleaseForward(g_pForwardEventKilled);
+			g_pForwardEventKilled = nullptr;
+		}
 
-	delete g_pBaseNPCFactory;
-	g_pBaseNPCFactory = nullptr;
+		g_pBaseNPCPluginActionFactories->SDK_OnUnload();
+		g_pPluginEntityFactories->SDK_OnUnload();
+
+		delete g_pBaseNPCFactory;
+		g_pBaseNPCFactory = nullptr;
+
+		m_bInitialized = false;
+	}
+
+	if (g_pGameConf)
+	{
+		gameconfs->CloseGameConfigFile(g_pGameConf);
+		g_pGameConf = nullptr;
+	}
 	
 	if (g_pSDKHooks) {
 		g_pSDKHooks->RemoveEntityListener(this);
 	}
-	
+
 	FOR_EACH_MAP_FAST(g_EntitiesHooks, iHookID)
 		SH_REMOVE_HOOK_ID(iHookID);
 }
 
-//Fix external stuff error
+bool CBaseNPCExt::Hook_LevelInit(const char* pMapName, const char* pMapEntities, const char* pOldLevel, const char* pLandmarkName, bool loadGame, bool background)
+{
+	if (m_iLevelInitHookID != 0)
+	{
+		SH_REMOVE_HOOK_ID(m_iLevelInitHookID);
+		m_iLevelInitHookID = 0;
+	}
+
+	if (m_bInitialized)
+	{
+		RETURN_META_VALUE(MRES_IGNORED, true);
+	}
+
+	char error[256] = { 0 };
+
+	if (!Initialize(error, sizeof(error)))
+	{
+		g_pSM->LogError(myself, "CBaseNPC tried initialization in LevelInit and failed!\n %s", error);
+
+		RETURN_META_VALUE(MRES_IGNORED, true);
+	}
+
+	//we have needed offsets now, hook and test
+	g_pPluginEntityFactories->SDK_OnAllLoaded();
+	TestDummyNPC();
+
+	RETURN_META_VALUE(MRES_IGNORED, true);
+}
+
+bool CBaseNPCExt::Initialize(char* error, size_t maxlength)
+{
+	if (!CBaseEntity::Init(g_pGameConf, error, maxlength)
+		|| !CBaseAnimating::Init(g_pGameConf, error, maxlength)
+		|| !CBaseAnimatingOverlay::Init(g_pGameConf, error, maxlength)
+		|| !CFuncBrush::Init(g_pGameConf, error, maxlength)
+		|| !CBaseToggle::Init(g_pGameConf, error, maxlength)
+		|| !CNavMesh::Init(g_pGameConf, error, maxlength)
+		|| !CBaseCombatCharacter::Init(g_pGameConf, error, maxlength)
+		|| !ToolsTraceFilterSimple::Init(g_pGameConf, error, maxlength)
+#if SOURCE_ENGINE == SE_TF2  
+		|| !CTFGameRules::Init(g_pGameConf, error, maxlength)
+#endif  
+		|| !CBaseEntityOutput::Init(g_pGameConf, error, maxlength)
+		|| !CBaseNPC_Locomotion::Init(g_pGameConf, error, maxlength)
+		|| !ToolsNextBot::Init(g_pGameConf, error, maxlength)
+		)
+	{
+		// Some initialization stages install detours before all later
+		// stages have succeeded. Roll them back before SourceMod unloads
+		// the extension DLL.
+		CNavMesh::Unload();
+		CBaseEntity::Unload();
+		return false;
+	}
+
+	if (!g_pPluginEntityFactories->Init(g_pGameConf, error, maxlength))
+	{
+		CNavMesh::Unload();
+		CBaseEntity::Unload();
+		return false;
+	}
+
+	if (!g_pBaseNPCPluginActionFactories->Init(g_pGameConf, error, maxlength))
+	{
+		g_pPluginEntityFactories->SDK_OnUnload();
+		CNavMesh::Unload();
+		CBaseEntity::Unload();
+		return false;
+	}
+
+	g_pBaseNPCFactory = new CBaseNPCFactory;
+
+	m_bInitialized = true;
+
+	return true;
+}
+
+void CBaseNPCExt::TestDummyNPC()
+{
+	CBaseNPC_Entity* npc = static_cast<CBaseNPC_Entity*>(servertools->CreateEntityByName("base_npc"));
+
+	if (!npc)
+	{
+		g_pSM->LogError(myself, "Failed to create dummy NPC!");
+		return;
+	}
+	
+	if (npc->GetNPC()->GetID() == INVALID_NPC_ID)
+	{
+		g_pSM->LogError(myself, "Dummy NPC has no id!");
+	}
+
+	INextBot* nb = npc->MyNextBotPointer();
+
+	if (nb == nullptr)
+	{
+		g_pSM->LogError(myself, "Dummy NPC has no nextbot interface!");
+	}
+
+	if (npc->GetNPC()->m_pMover == nullptr || (nb && nb->GetLocomotionInterface() == nullptr))
+	{
+		g_pSM->LogError(myself, "Dummy NPC has no locomotion interface!");
+	}
+
+	if (npc->GetNPC()->m_pBody == nullptr || (nb && nb->GetBodyInterface() == nullptr))
+	{
+		g_pSM->LogError(myself, "Dummy NPC has no body interface!");
+	}
+
+	servertools->RemoveEntityImmediate(npc);
+	g_pSM->LogMessage(myself, "Successfully created & destroyed dummy NPC");
+}
+
+// Definitions required by the SDK timer declarations. The extension only uses
+// their layout and timing helpers, so an empty datamap is sufficient here.
+#if SOURCE_ENGINE == SE_BMS
+datamap_t IntervalTimer::m_DataMap = { 0, 0, "IntervalTimer", nullptr };
+
+datamap_t* IntervalTimer::GetBaseMap()
+{
+	return nullptr;
+}
+
+datamap_t* IntervalTimer::GetDataDescMap()
+{
+	return &m_DataMap;
+}
+#endif
+
 float IntervalTimer::Now( void ) const {
 	return gpGlobals->curtime;
 }

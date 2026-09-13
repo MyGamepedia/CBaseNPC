@@ -48,14 +48,14 @@
 
 #define TEAM_ANY -2
 
-const CBaseNPC INVALID_NPC = view_as<CBaseNPC>(-1);
-const CNavArea NULL_AREA = view_as<CNavArea>(0);
-const CNavLadder NULL_LADDER_AREA = view_as<CNavLadder>(0);
-const HidingSpot NULL_HIDING_SPOT = view_as<HidingSpot>(0);
-const CKnownEntity NULL_KNOWN_ENTITY = view_as<CKnownEntity>(0);
-const NextBotAction NULL_ACTION = view_as<NextBotAction>(0);
-const INextBot NULL_NEXT_BOT = view_as<INextBot>(0);
-const Segment NULL_PATH_SEGMENT = view_as<Segment>(0);
+#define INVALID_NPC view_as<CBaseNPC>(-1)
+#define NULL_AREA view_as<CNavArea>(0)
+#define NULL_LADDER_AREA view_as<CNavLadder>(0)
+#define NULL_HIDING_SPOT view_as<HidingSpot>(0)
+#define NULL_KNOWN_ENTITY view_as<CKnownEntity>(0)
+#define NULL_ACTION view_as<NextBotAction>(0)
+#define NULL_NEXT_BOT view_as<INextBot>(0)
+#define NULL_PATH_SEGMENT view_as<Segment>(0)
 
 #include "cbasenpc/nav.inc"
 #include "cbasenpc/baseentity.inc"
@@ -236,6 +236,13 @@ methodmap CNPCs __nullable__
 
 forward Action CBaseEntity_SetLocalAngles(int iEntity, float vecNewAngles[3]);
 forward Action CBaseCombatCharacter_EventKilled(int iEntity, int &iAttacker, int &iInflictor, float &flDamage, int &iDamagetype, int &iWeapon, float vecDamageForce[3], float vecDamagePosition[3], int iDamagecustom);
+/**
+ * Called once when CBaseNPC has completed its runtime initialization.
+ *
+ * At this point entity-dependent offsets, datamaps and factory hooks
+ * required by CBaseNPC are ready.
+ */
+forward void OnCBaseNPCInitialized();
 
 public Extension __ext_cbasenpc = 
 {
