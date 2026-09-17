@@ -75,7 +75,6 @@ public:
 
 	bool Init( IGameConfig* config, char* error, size_t maxlength );
 	void OnCoreMapEnd();
-	void SDK_OnAllLoaded();
 	void SDK_OnUnload();
 
 	HandleType_t GetFactoryType() const { return m_FactoryType; }

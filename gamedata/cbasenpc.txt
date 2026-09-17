@@ -620,11 +620,12 @@
 			}
 			//how to find: find CAI_Hint::OnRestore by string ''Warning: AI hint has incorrect or no AI node\n'',
 			//the very first func it calls is CBaseEntity::OnRestore, one of the funcs it calls is what you need,
-			//the what you need also calls other func with global object and param_1, and the func is actually what you need, not real SimThink_EntityChanged
+			//it is one of the "FUN_XX(this)", all the needed func does is calling other func with global object and this
+			//note: unlike TF2, it takes actual func, not what it calls
 			"SimThink_EntityChanged"
 			{
 				"library"		"server"
-				"windows"        "\x55\x8B\xEC\x53\x57\x8B\x7D\x08\x8B\xD9\xF6\x87\x04\x01\x00\x00\x01\x0F\x85\x2A\x2A\x2A\x2A\x8B\x07\x8B\xCF\x56\xFF\x50\x08"
+				"windows"       "\x55\x8B\xEC\xFF\x75\x08\xB9\x2A\x2A\x2A\x2A\xE8\xE0\xE0\xFF\xFF\x5D\xC3"
 				"linux"			"@_Z22SimThink_EntityChangedP11CBaseEntity"
 			}
 			"CBaseEntity::CBaseEntity" //how to find: find CLensFlare::CLensFlare by string ''sprites/glow02.spr'', the very first func it calls is what you need

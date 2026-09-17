@@ -35,9 +35,6 @@ HandleType_t g_PluginEntityFactoryHandle;
 
 CPluginEntityFactories* g_pPluginEntityFactories = new CPluginEntityFactories();
 
-extern IForward* g_pForwardOnCBaseNPCInitialized;
-extern bool		 m_bInitialized;
-
 class EntityMemAllocHook_t
 {
 private:
@@ -179,6 +176,10 @@ CPluginEntityFactory* CPluginEntityFactories::GetFactoryFromHandle( Handle_t han
 
 bool CPluginEntityFactories::Init( IGameConfig* config, char* error, size_t maxlength )
 {
+	SH_MANUALHOOK_RECONFIGURE(FactoryEntity_GetDataDescMap, CBaseEntity::offset_GetDataDescMap, 0, 0);
+	SH_MANUALHOOK_RECONFIGURE(FactoryEntity_UpdateOnRemove, CBaseEntity::offset_UpdateOnRemove, 0, 0);
+	SH_MANUALHOOK_RECONFIGURE(EntityRecord_MyNextBotPointer, CBaseEntity::offset_MyNextBotPointer, 0, 0);
+
 	CEntityFactoryDictionaryHack* factoryDictionary = EntityFactoryDictionaryHack();
 	{
 		IEntityFactory* factory = nullptr;
@@ -344,25 +345,14 @@ void CPluginEntityFactories::RemoveGameFactory(IEntityFactory* factory)
 	}
 }
 
-void CPluginEntityFactories::SDK_OnAllLoaded()
-{
-	SH_MANUALHOOK_RECONFIGURE(FactoryEntity_GetDataDescMap, CBaseEntity::offset_GetDataDescMap, 0, 0);
-	SH_MANUALHOOK_RECONFIGURE(FactoryEntity_UpdateOnRemove, CBaseEntity::offset_UpdateOnRemove, 0, 0);
-	SH_MANUALHOOK_RECONFIGURE(EntityRecord_MyNextBotPointer, CBaseEntity::offset_MyNextBotPointer, 0, 0);
-
-	//now plugins can safely create new classes
-	if (g_pForwardOnCBaseNPCInitialized && m_bInitialized)
-	{
-		g_pForwardOnCBaseNPCInitialized->Execute(nullptr);
-	}
-}
-
 void CPluginEntityFactories::OnCoreMapEnd()
 {
 }
 
 void CPluginEntityFactories::SDK_OnUnload()
 {
+	plsys->RemovePluginsListener(this);
+
 	g_EntityMemAllocHook.Shutdown();
 
 	for (int hookId : m_hookIds)
@@ -384,8 +374,6 @@ void CPluginEntityFactories::SDK_OnUnload()
 	forwards->ReleaseForward( m_fwdUninstalledFactory );
 	m_fwdInstalledFactory = nullptr;
 	m_fwdUninstalledFactory = nullptr;
-
-	plsys->RemovePluginsListener( this );
 }
 
 void CPluginEntityFactories::OnFactoryCreated( CPluginEntityFactory* pFactory )

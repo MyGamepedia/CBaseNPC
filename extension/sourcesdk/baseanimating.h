@@ -10,7 +10,7 @@ class COutputEvent;
 class CBaseAnimating : public CBaseEntity
 {
 public:
-	static bool Init(SourceMod::IGameConfig* config, char* error, size_t maxlength);
+	static bool Init(SourceMod::IGameConfig* config, char* error, size_t maxlength, datamap_t* dataMap = nullptr);
 
 	float GetModelScale() const;
 

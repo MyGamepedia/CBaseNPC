@@ -30,7 +30,7 @@ DEFINEVAR(CBaseAnimating, m_OnIgnite);
 DEFINEVAR(CBaseAnimating, m_nSequence);
 DEFINEVAR(CBaseAnimating, m_flModelScale);
 
-bool CBaseAnimating::Init(SourceMod::IGameConfig* config, char* error, size_t maxlength)
+bool CBaseAnimating::Init(SourceMod::IGameConfig* config, char* error, size_t maxlength, datamap_t* dataMap)
 {
 	try
 	{
@@ -62,7 +62,7 @@ bool CBaseAnimating::Init(SourceMod::IGameConfig* config, char* error, size_t ma
 	}
 
 	// Any entity that inherits CBaseAnimating is good
-	BEGIN_VAR("gib");
+	BEGIN_VAR("gib", dataMap);
 	OFFSETVAR_DATA(CBaseAnimating, m_OnIgnite);
 	OFFSETVAR_SEND(CBaseAnimating, m_nSequence);
 	OFFSETVAR_SEND(CBaseAnimating, m_flModelScale);

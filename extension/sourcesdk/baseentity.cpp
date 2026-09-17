@@ -28,7 +28,8 @@ VCall<int, const CTakeDamageInfo&> CBaseEntity::vOnTakeDamage;
 VCall<bool> CBaseEntity::vIsAlive;
 MCall<void> CBaseEntity::mCalcAbsolutePosition;
 
-#ifndef __linux__
+// Black Mesa and Linux expose the free function; Windows TF2 uses the manager method.
+#if !defined(__linux__) && SOURCE_ENGINE != SE_BMS
 class IEntityListener;
 MCall<void, CBaseEntity*> SimThink_EntityChanged; // In reality CSimThinkManager::EntityChanged
 IEntityListener* g_pSimThinkManager = nullptr;
@@ -85,7 +86,7 @@ DEFINEVAR(CBaseEntity, m_ModelName);
 
 trace_t* g_pTouchTrace;
 
-bool CBaseEntity::Init(SourceMod::IGameConfig* config, char* error, size_t maxlength)
+bool CBaseEntity::Init(SourceMod::IGameConfig* config, char* error, size_t maxlength, datamap_t* dataMap)
 {
 	// Some function signatures & offsets can be fetched from Sourcemod, yay!
 	SourceMod::IGameConfig* configCore;
@@ -127,7 +128,7 @@ bool CBaseEntity::Init(SourceMod::IGameConfig* config, char* error, size_t maxle
 
 		// This function also doesn't warrant its own file, as it only ever used by CBaseEntity
 		SimThink_EntityChanged.Init(config, "SimThink_EntityChanged");
-#ifndef __linux__
+#if !defined(__linux__) && SOURCE_ENGINE != SE_BMS
 		g_pSimThink_EntityChangedDetour = DETOUR_CREATE_MEMBER(SimThink_EntityChanged, "SimThink_EntityChanged")
 			g_pSimThink_EntityChangedDetour->EnableDetour();
 #endif
@@ -190,7 +191,7 @@ bool CBaseEntity::Init(SourceMod::IGameConfig* config, char* error, size_t maxle
 	}
 
 	// Any entity that inherits CBaseEntity is good.
-	BEGIN_VAR("trigger");
+	BEGIN_VAR("trigger", dataMap);
 	OFFSETVAR_DATA(CBaseEntity, m_pfnThink);
 	OFFSETVAR_DATA(CBaseEntity, m_iClassname);
 	OFFSETVAR_DATA(CBaseEntity, m_nModelIndex);
@@ -229,7 +230,7 @@ bool CBaseEntity::Init(SourceMod::IGameConfig* config, char* error, size_t maxle
 	gameconfs->CloseGameConfigFile(configSDKHooks);
 	gameconfs->CloseGameConfigFile(configCore);
 
-#ifndef __linux__
+#if !defined(__linux__) && SOURCE_ENGINE != SE_BMS
 	if (g_pSimThinkManager == nullptr)
 	{
 		snprintf(error, maxlength, "Failed to retrieve CSimThinkManager - g_SimThinkManager!");
@@ -759,7 +760,7 @@ void CBaseEntity::CheckHasThinkFunction(bool isThinking)
 	{
 		AddEFlags(EFL_NO_THINK_FUNCTION);
 	}
-#ifndef __linux__
+#if !defined(__linux__) && SOURCE_ENGINE != SE_BMS
 	SimThink_EntityChanged(g_pSimThinkManager, this);
 #else
 	SimThink_EntityChanged(this);
@@ -801,7 +802,7 @@ void CBaseEntity::SetLocalAngles(const QAngle& angles)
 
 void CBaseEntity::Unload()
 {
-#ifndef __linux__
+#if !defined(__linux__) && SOURCE_ENGINE != SE_BMS
     if (g_pSimThink_EntityChangedDetour != nullptr)
     {
         g_pSimThink_EntityChangedDetour->Destroy();

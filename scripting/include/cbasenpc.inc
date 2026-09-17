@@ -236,13 +236,6 @@ methodmap CNPCs __nullable__
 
 forward Action CBaseEntity_SetLocalAngles(int iEntity, float vecNewAngles[3]);
 forward Action CBaseCombatCharacter_EventKilled(int iEntity, int &iAttacker, int &iInflictor, float &flDamage, int &iDamagetype, int &iWeapon, float vecDamageForce[3], float vecDamagePosition[3], int iDamagecustom);
-/**
- * Called once when CBaseNPC has completed its runtime initialization.
- *
- * At this point entity-dependent offsets, datamaps and factory hooks
- * required by CBaseNPC are ready.
- */
-forward void OnCBaseNPCInitialized();
 
 public Extension __ext_cbasenpc = 
 {

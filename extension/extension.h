@@ -11,6 +11,8 @@
 #include <itoolentity.h>
 #include "helpers.h"
 #include "shared/npctools.h"
+#include <datamap.h>
+#include <cstddef>
 
 
 extern CGlobalVars *gpGlobals;
@@ -64,7 +66,9 @@ class CBaseNPCExt : public SDKExtension, public ISMEntityListener, public IConCo
 			//virtual bool SDK_OnMetamodPauseChange(bool paused, char *error, size_t maxlength);
 		#endif
 
-	bool Initialize(char* error, size_t maxlength); //load all offsets and stuff here, when server is ready, in case it isn't
+	bool Initialize(char* error, size_t maxlength, datamap_t* const* dataMaps = nullptr);
+
+	bool GetDataMaps(const char* const* dataMapNames, datamap_t** dataMaps, size_t count); //get datamaps by memory scan
 
 private:
 	//initialize hooks and offsets when server is ready in case it isn't, fired only once
