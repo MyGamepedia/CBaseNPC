@@ -91,6 +91,7 @@ void IDataMapContainer::DestroyDataDesc()
 	}
 
 	m_vecEntityDataTypeDescriptors.Purge();
+	m_DataMapDescSizeInBytes = 0;
 }
 
 void IDataMapContainer::BeginDataDesc()
@@ -187,6 +188,11 @@ void IDataMapContainer::EndDataDesc()
 
 void IDataMapContainer::DefineField(const char* name, fieldtype_t fieldType, unsigned short count, short flags, const char* externalName, float fieldTolerance)
 {
+	DefineFieldAndGetIndex(name, fieldType, count, flags, externalName, fieldTolerance);
+}
+
+int IDataMapContainer::DefineFieldAndGetIndex(const char* name, fieldtype_t fieldType, unsigned short count, short flags, const char* externalName, float fieldTolerance)
+{
 	size_t padding = 0;
 	int fieldOffset = GetAlignedOffset( GetDataDescOffset() + m_DataMapDescSizeInBytes, fieldType, &padding );
 	int fieldSizeInBytes = g_DataMapDescFieldSizes[fieldType] * count;
@@ -209,6 +215,7 @@ void IDataMapContainer::DefineField(const char* name, fieldtype_t fieldType, uns
 	});
 
 	m_DataMapDescSizeInBytes += padding + fieldSizeInBytes;
+	return m_vecEntityDataTypeDescriptors.Count() - 1;
 }
 
 // from sourcemod/public/compat_wrappers.h

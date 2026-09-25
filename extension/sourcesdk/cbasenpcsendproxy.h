@@ -29,6 +29,8 @@ public:
 	SendTableProxyFn GetSendLocalDataTable() const;
 
 	SendVarProxyFn GetEHandleToInt() const;
+	int GetEHandleBits() const { return m_iEHandleBits; }
+	int GetEHandleFlags() const { return m_iEHandleFlags; }
 
 public:
 	static void VectorXYToVectorXY(
@@ -82,6 +84,8 @@ public:
 private:
 	CStandardSendProxies* m_pStandardSendProxies;
 	SendVarProxyFn m_pEHandleToInt;
+	int m_iEHandleBits = 0;
+	int m_iEHandleFlags = 0;
 	bool m_bInitialized;
 };
 

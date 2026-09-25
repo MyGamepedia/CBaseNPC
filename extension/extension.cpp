@@ -4,6 +4,7 @@
 #include <CDetour/detours.h>
 #include "helpers.h"
 #include "sourcesdk/cbasenpcsendproxy.h"
+#include "sourcesdk/cbasenpcserverclass.h"
 #include "sourcesdk/nav_mesh.h"
 #if SOURCE_ENGINE == SE_TF2  
 #include "sourcesdk/tf_gamerules.h"  
@@ -112,6 +113,11 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	}
 
 	bool bEdictSlotsAreNotAvailable = engine->GetEntityCount() < 1;
+	if (!g_CBaseNPCServerClassManager.Init(g_pGameConf, error, maxlength))
+	{
+		g_CBaseNPCSendProxy.Shutdown();
+		return false;
+	}
 
 	if (bEdictSlotsAreNotAvailable) //we loaded early - can't create edicts to get datamaps from their methods, try to scan memory for datamaps instead
 	{
@@ -133,6 +139,7 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 			if (!Initialize(error, maxlength, dataMaps)) //still didn't initialize smh
 			{
 				g_CBaseNPCSendProxy.Shutdown();
+				g_CBaseNPCServerClassManager.Shutdown();
 				return false;
 			}
 
@@ -147,6 +154,7 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	else if (!Initialize(error, maxlength)) //we can create edicts but didn't initialized
 	{
 		g_pSM->LogMessage(myself, "CBaseNPC failed to initialize using edicts!");
+		g_CBaseNPCServerClassManager.Shutdown();
 		g_CBaseNPCSendProxy.Shutdown();
 		return false;
 	}
@@ -287,6 +295,13 @@ void CBaseNPCExt::SDK_OnAllLoaded() {
 	g_pEntityList = (CBaseEntityList *)gamehelpers->GetGlobalEntityList();
 }
 
+void CBaseNPCExt::SDK_OnAllPluginsLoaded()
+{
+	char error[512];
+	if (!g_CBaseNPCServerClassManager.Finalize(error, sizeof(error)))
+		g_pSM->LogError(myself, "Failed to finalize CBaseNPC network classes: %s", error);
+}
+
 bool CBaseNPCExt::QueryRunning(char* error, size_t maxlength) {
 	SM_CHECK_IFACE(BINTOOLS, g_pBinTools);
 	SM_GET_LATE_IFACE(SDKHOOKS, g_pSDKHooks);
@@ -320,6 +335,7 @@ void CBaseNPCExt::NotifyInterfaceDrop(SMInterface* interface) {
 
 void CBaseNPCExt::SDK_OnUnload()
 {
+	g_CBaseNPCServerClassManager.Shutdown();
 	if (m_iLevelInitHookID != 0)
 	{
 		SH_REMOVE_HOOK_ID(m_iLevelInitHookID);

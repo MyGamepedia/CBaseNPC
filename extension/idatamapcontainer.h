@@ -54,6 +54,12 @@ public:
 
 	// Defines a data property type descriptor of the datamap.
 	virtual void DefineField(const char* name, fieldtype_t fieldType, unsigned short count, short flags, const char* externalName, float fieldTolerance);
+	// Stable index for metadata collected while the descriptor vector can grow.
+	int DefineFieldAndGetIndex(const char* name, fieldtype_t fieldType, unsigned short count, short flags, const char* externalName, float fieldTolerance);
+	const typedescription_t* GetFieldDescriptor(int index) const
+	{
+		return m_vecEntityDataTypeDescriptors.IsValidIndex(index) ? &m_vecEntityDataTypeDescriptors[index] : nullptr;
+	}
 
 	// Finishes defining type descriptors.
 	virtual void EndDataDesc();

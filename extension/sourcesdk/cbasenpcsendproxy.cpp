@@ -143,6 +143,8 @@ bool CBaseNPCSendProxy::Init(char* error, size_t maxlength)
 	}
 
 	m_bInitialized = true;
+	m_iEHandleBits = prop->m_nBits;
+	m_iEHandleFlags = prop->GetFlags();
 	return true;
 }
 
@@ -150,6 +152,8 @@ void CBaseNPCSendProxy::Shutdown()
 {
 	m_pStandardSendProxies = nullptr;
 	m_pEHandleToInt = nullptr;
+	m_iEHandleBits = 0;
+	m_iEHandleFlags = 0;
 	m_bInitialized = false;
 }
 

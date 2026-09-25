@@ -48,6 +48,7 @@ class CBaseNPCExt : public SDKExtension, public ISMEntityListener, public IConCo
 		virtual bool SDK_OnLoad(char *error, size_t maxlength, bool late);
 		virtual void SDK_OnUnload();
 		virtual void SDK_OnAllLoaded();
+		void SDK_OnAllPluginsLoaded() override;
 		//virtual void SDK_OnPauseChange(bool paused);
 		virtual bool QueryRunning(char *error, size_t maxlength);
 		virtual bool QueryInterfaceDrop(SMInterface *pInterface);

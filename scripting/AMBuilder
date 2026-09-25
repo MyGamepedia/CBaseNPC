@@ -1,10 +1,15 @@
 import os
 
 files = [
-  'cbasenpc/bmsnavtest/cbasenpc_bmsnavtest.sp',
   'cbasenpc_actiontest.sp',
-  'cbasenpc_example.sp'
+  'cbasenpc_example.sp',
+  'cbasenpc_otis_sendprops_test.sp'
 ]
+
+# Some source archives omit the optional BMS nav test directory.
+bms_nav_test = 'cbasenpc/bmsnavtest/cbasenpc_bmsnavtest.sp'
+if os.path.isfile(os.path.join(builder.currentSourcePath, bms_nav_test)):
+  files.insert(0, bms_nav_test)
 
 spcomp_argv = [
   os.path.join(builder.buildPath, Extension.spcomp_path),

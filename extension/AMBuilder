@@ -34,6 +34,8 @@ project.sources = [
   'sourcesdk/baseanimatingoverlay.cpp',
   'sourcesdk/basecombatcharacter.cpp',
   'sourcesdk/cbasenpcsendproxy.cpp',
+  'sourcesdk/cbasenpcsendtable.cpp',
+  'sourcesdk/cbasenpcserverclass.cpp',
   'sourcesdk/servernetworkproperty.cpp',
   'sourcesdk/collisionproperty.cpp',
   'sourcesdk/tracefilter_simple.cpp',
@@ -88,6 +90,8 @@ for sdk_name in Extension.sdks:
         'natives/bms/nav.cpp',
         'natives/bms/nav/area.cpp',
       ]
+    if binary.compiler.target.platform == 'linux':
+      binary.compiler.linkflags += ['-ldl']
     Extension.AddCDetour(binary)
     binary.compiler.cxxincludes += [
       os.path.join(builder.currentSourcePath, 'sourcesdk'),

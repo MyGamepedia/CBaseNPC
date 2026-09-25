@@ -1,5 +1,6 @@
 #include "entityfactory.hpp"
 #include "pluginentityfactory.h"
+#include "sourcesdk/cbasenpcserverclass.h"
 
 namespace natives::entityfactory {
 
@@ -25,6 +26,17 @@ inline CPluginEntityFactory* Get(IPluginContext* context, const cell_t param, bo
 		} else {
 			context->ThrowNativeError("Factory must be uninstalled!");
 		}
+		return nullptr;
+	}
+	return factory;
+}
+
+inline CPluginEntityFactory* GetEditable(IPluginContext* context, cell_t handle)
+{
+	auto factory = Get(context, handle, false);
+	if (factory && factory->IsNetworkLayoutFrozen())
+	{
+		context->ThrowNativeError("Factory layout is frozen by the network schema. Restart required to change it.");
 		return nullptr;
 	}
 	return factory;
@@ -84,7 +96,7 @@ cell_t GetInstalledFactories(IPluginContext* context, const cell_t* params) {
 }
 
 cell_t DeriveFromBaseEntity(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -94,7 +106,7 @@ cell_t DeriveFromBaseEntity(IPluginContext* context, const cell_t* params) {
 }
 
 cell_t DeriveFromNPC(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -123,7 +135,7 @@ cell_t SetInitialActionFactory(IPluginContext* context, const cell_t* params) {
 }
 
 cell_t DeriveFromClass(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -142,7 +154,7 @@ cell_t DeriveFromClass(IPluginContext* context, const cell_t* params) {
 }
 
 cell_t DeriveFromFactory(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -162,7 +174,7 @@ cell_t DeriveFromFactory(IPluginContext* context, const cell_t* params) {
 }
 
 cell_t DeriveFromConf(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -270,7 +282,7 @@ cell_t AttachNextBot(IPluginContext* context, const cell_t* params) {
 }
 
 cell_t BeginDataMapDesc(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -292,7 +304,7 @@ cell_t BeginDataMapDesc(IPluginContext* context, const cell_t* params) {
 }
 
 cell_t EndDataMapDesc(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -301,102 +313,100 @@ cell_t EndDataMapDesc(IPluginContext* context, const cell_t* params) {
 	return 0;
 }
 
-inline void DefineField(IPluginContext* context, const cell_t* params, fieldtype_t fieldType) {
-	auto factory = Get(context, params[1], false);
-	if (!factory) {
-		return;
-	}
-
-	char* fieldName;
-	context->LocalToString(params[2], &fieldName);
-	if (!fieldName || (fieldName && !fieldName[0])) {
-		context->ThrowNativeError("Field name cannot be NULL or empty");
-		return;
-	}
-
-	int numElements = params[3];
-	if (numElements <= 0) {
-		context->ThrowNativeError("Elements must be >= 1");
-		return;
-	}
-
-	char* keyName;
-	context->LocalToStringNULL(params[4], &keyName);
-	if (keyName && !keyName[0]) {
-		context->ThrowNativeError("Key name cannot be NULL or empty");
-		return;
-	}
-
-	if (keyName && numElements > 1) {
-		context->ThrowNativeError("Key field cannot be an array");
-		return;
-	}
-
-	if (!!keyName) {
-		factory->DefineKeyField(fieldName, fieldType, keyName);
-	} else {
-		factory->DefineField(fieldName, fieldType, numElements);
-	}
+// Optional arguments are read only when present, preserving already compiled SMX files.
+inline cell_t Optional(const cell_t* params, int index, cell_t value = 0)
+{
+	return params[0] >= index ? params[index] : value;
 }
 
-cell_t DefineIntField(IPluginContext* context, const cell_t* params) {
-	DefineField(context, params, FIELD_INTEGER);
+cell_t DefineServerClass(IPluginContext* context, const cell_t* params)
+{
+	auto factory = Get(context, params[1]);
+	if (!factory) return 0;
+	char *name, *table, *base;
+	context->LocalToString(params[2], &name);
+	context->LocalToString(params[3], &table);
+	context->LocalToString(params[4], &base);
+	std::string error;
+	if (!factory->DefineServerClass(name, table, base, error))
+		return context->ThrowNativeError("%s: %s", factory->m_iClassname.c_str(), error.c_str());
 	return params[1];
 }
 
-cell_t DefineFloatField(IPluginContext* context, const cell_t* params) {
-	DefineField(context, params, FIELD_FLOAT);
-	return params[1];
-}
-
-cell_t DefineCharField(IPluginContext* context, const cell_t* params) {
-	DefineField(context, params, FIELD_CHARACTER);
-	return params[1];
-}
-
-cell_t DefineBoolField(IPluginContext* context, const cell_t* params) {
-	DefineField(context, params, FIELD_BOOLEAN);
-	return params[1];
-}
-
-cell_t DefineVectorField(IPluginContext* context, const cell_t* params) {
-	DefineField(context, params, FIELD_VECTOR);
-	return params[1];
-}
-
-cell_t DefineStringField(IPluginContext* context, const cell_t* params) {
-	DefineField(context, params, FIELD_STRING);
-	return params[1];
-}
-
-cell_t DefineColorField(IPluginContext* context, const cell_t* params) {
-	DefineField(context, params, FIELD_COLOR32);
-	return params[1];
-}
-
-cell_t DefineEntityField(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
-	if (!factory) {
-		return 0;
+cell_t DefineField(IPluginContext* context, const cell_t* params, fieldtype_t fieldType, CBaseNPCSendFieldKind kind)
+{
+	auto factory = GetEditable(context, params[1]);
+	if (!factory) return 0;
+	char* name;
+	context->LocalToString(params[2], &name);
+	if (!name || !*name) return context->ThrowNativeError("Field name cannot be empty");
+	int count = params[3];
+	if (count < 1 || count > 65535) return context->ThrowNativeError("%s: element count must be in 1..65535", name);
+	bool entity = kind == CBaseNPCSendFieldKind::EHandle;
+	char* key = nullptr;
+	if (!entity) context->LocalToStringNULL(params[4], &key);
+	if (key && (!*key || count > 1)) return context->ThrowNativeError("%s: key name must be nonempty and key fields cannot be arrays", name);
+	bool send = Optional(params, entity ? 4 : 5) != 0;
+	CBaseNPCSendFieldDesc desc;
+	desc.kind = kind;
+	if (send)
+	{
+		if (!g_CBaseNPCServerClassManager.IsRegistrationOpen())
+			return context->ThrowNativeError("%s", g_CBaseNPCServerClassManager.RegistrationError());
+		if (!factory->IsDefiningDataDesc())
+			return context->ThrowNativeError("%s: network fields require BeginDataMapDesc/EndDataMapDesc", name);
+		if (count > MAX_ARRAY_ELEMENTS)
+			return context->ThrowNativeError("%s: array exceeds MAX_ARRAY_ELEMENTS (%d)", name, MAX_ARRAY_ELEMENTS);
+		using Kind = CBaseNPCSendFieldKind;
+		switch (kind)
+		{
+		case Kind::Int: case Kind::Short: case Kind::Char:
+			desc.bits = Optional(params, 6, -1); desc.flags = Optional(params, 7); break;
+		case Kind::Float: case Kind::Vector: case Kind::VectorXY:
+			desc.bits = Optional(params, 6, 32);
+			desc.flags = Optional(params, 7, kind == Kind::Float ? 0 : SPROP_NOSCALE);
+			if (params[0] >= 8) desc.lowValue = sp_ctof(params[8]);
+			if (params[0] >= 9) desc.highValue = sp_ctof(params[9]);
+			break;
+		case Kind::Angle: case Kind::QAngle:
+			desc.bits = Optional(params, 6, 32); desc.flags = Optional(params, 7); break;
+		case Kind::StringT:
+			desc.stringMaxLength = Optional(params, 6, DT_MAX_STRING_BUFFERSIZE);
+			desc.flags = Optional(params, 7); break;
+		case Kind::EHandle: desc.flags = Optional(params, 5); break;
+		default: desc.flags = Optional(params, 6); break;
+		}
+		std::string error;
+		if (!CBaseNPC_ValidateSendFieldOptions(desc, error))
+			return context->ThrowNativeError("%s: %s", name, error.c_str());
 	}
-
-	char* fieldName;
-	context->LocalToString(params[2], &fieldName);
-	if (!fieldName || (fieldName && !fieldName[0])) {
-		return context->ThrowNativeError("Field name cannot be NULL or empty");
-	}
-
-	int numElements = params[3];
-	if (numElements <= 0) {
-		return context->ThrowNativeError("Elements must be >= 1");
-	}
-
-	factory->DefineField(fieldName, FIELD_EHANDLE, numElements);
+	desc.dataDescIndex = factory->DefineFieldAndGetIndex(name, fieldType, static_cast<unsigned short>(count),
+		FTYPEDESC_SAVE | (key ? FTYPEDESC_KEY : 0), key, 0.0f);
+	if (send) factory->AddSendField(desc);
 	return params[1];
 }
+
+#define DEFINE_FIELD_NATIVE(name, type, kind) \
+cell_t name(IPluginContext* context, const cell_t* params) \
+{ return DefineField(context, params, type, CBaseNPCSendFieldKind::kind); }
+DEFINE_FIELD_NATIVE(DefineIntField, FIELD_INTEGER, Int)
+DEFINE_FIELD_NATIVE(DefineShortField, FIELD_SHORT, Short)
+DEFINE_FIELD_NATIVE(DefineCharField, FIELD_CHARACTER, Char)
+DEFINE_FIELD_NATIVE(DefineBoolField, FIELD_BOOLEAN, Bool)
+DEFINE_FIELD_NATIVE(DefineFloatField, FIELD_FLOAT, Float)
+DEFINE_FIELD_NATIVE(DefineVectorField, FIELD_VECTOR, Vector)
+DEFINE_FIELD_NATIVE(DefineVectorXYField, FIELD_VECTOR, VectorXY)
+DEFINE_FIELD_NATIVE(DefineStringField, FIELD_STRING, StringT)
+DEFINE_FIELD_NATIVE(DefineColorField, FIELD_COLOR32, Color32)
+DEFINE_FIELD_NATIVE(DefineEntityField, FIELD_EHANDLE, EHandle)
+DEFINE_FIELD_NATIVE(DefineTimeField, FIELD_TIME, Time)
+DEFINE_FIELD_NATIVE(DefineAngleField, FIELD_FLOAT, Angle)
+DEFINE_FIELD_NATIVE(DefineQAngleField, FIELD_VECTOR, QAngle)
+DEFINE_FIELD_NATIVE(DefineModelIndexField, FIELD_MODELINDEX, ModelIndex)
+#undef DEFINE_FIELD_NATIVE
 
 cell_t DefineInputFunc(IPluginContext* context, const cell_t* params) {
-	auto factory = Get(context, params[1], false);
+	auto factory = GetEditable(context, params[1]);
 	if (!factory) {
 		return 0;
 	}
@@ -434,6 +444,8 @@ cell_t DefineInputFunc(IPluginContext* context, const cell_t* params) {
 
 cell_t DefineOutput(IPluginContext* context, const cell_t* params) {
 	auto factory = Get(context, params[1]);
+	if (!factory) return 0;
+	if (factory->IsNetworkLayoutFrozen()) return context->ThrowNativeError("Factory layout is frozen by the network schema; restart required");
 	
 	char* keyName;
 	context->LocalToString(params[2], &keyName);
@@ -472,6 +484,13 @@ void setup(std::vector<sp_nativeinfo_t>& natives) {
 		{"CEntityFactory.AttachNextBot", AttachNextBot},
 		{"CEntityFactory.BeginDataMapDesc", BeginDataMapDesc},
 		{"CEntityFactory.DefineIntField", DefineIntField},
+		{"CEntityFactory.DefineServerClass", DefineServerClass},
+		{"CEntityFactory.DefineShortField", DefineShortField},
+		{"CEntityFactory.DefineTimeField", DefineTimeField},
+		{"CEntityFactory.DefineAngleField", DefineAngleField},
+		{"CEntityFactory.DefineQAngleField", DefineQAngleField},
+		{"CEntityFactory.DefineModelIndexField", DefineModelIndexField},
+		{"CEntityFactory.DefineVectorXYField", DefineVectorXYField},
 		{"CEntityFactory.DefineFloatField", DefineFloatField},
 		{"CEntityFactory.DefineCharField", DefineCharField},
 		{"CEntityFactory.DefineBoolField", DefineBoolField},
