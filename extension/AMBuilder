@@ -33,6 +33,7 @@ project.sources = [
   'sourcesdk/baseanimating.cpp',
   'sourcesdk/baseanimatingoverlay.cpp',
   'sourcesdk/basecombatcharacter.cpp',
+  'sourcesdk/cbasenpcsendproxy.cpp',
   'sourcesdk/servernetworkproperty.cpp',
   'sourcesdk/collisionproperty.cpp',
   'sourcesdk/tracefilter_simple.cpp',

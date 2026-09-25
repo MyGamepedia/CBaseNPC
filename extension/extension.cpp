@@ -3,6 +3,7 @@
 #include "extension.h"
 #include <CDetour/detours.h>
 #include "helpers.h"
+#include "sourcesdk/cbasenpcsendproxy.h"
 #include "sourcesdk/nav_mesh.h"
 #if SOURCE_ENGINE == SE_TF2  
 #include "sourcesdk/tf_gamerules.h"  
@@ -101,6 +102,15 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 
 	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 
+	int iOffset = 0;
+	GETGAMEDATAOFFSET("CBaseEntity::Event_Killed", iOffset);
+	SH_MANUALHOOK_RECONFIGURE(MEvent_Killed, iOffset, 0, 0);
+
+	if (!g_CBaseNPCSendProxy.Init(error, maxlength))
+	{
+		return false;
+	}
+
 	bool bEdictSlotsAreNotAvailable = engine->GetEntityCount() < 1;
 
 	if (bEdictSlotsAreNotAvailable) //we loaded early - can't create edicts to get datamaps from their methods, try to scan memory for datamaps instead
@@ -122,6 +132,7 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 		{
 			if (!Initialize(error, maxlength, dataMaps)) //still didn't initialize smh
 			{
+				g_CBaseNPCSendProxy.Shutdown();
 				return false;
 			}
 
@@ -136,14 +147,11 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	else if (!Initialize(error, maxlength)) //we can create edicts but didn't initialized
 	{
 		g_pSM->LogMessage(myself, "CBaseNPC failed to initialize using edicts!");
+		g_CBaseNPCSendProxy.Shutdown();
 		return false;
 	}
 
 	g_pForwardEventKilled = forwards->CreateForward("CBaseCombatCharacter_EventKilled", ET_Event, 9, nullptr, Param_Cell, Param_CellByRef, Param_CellByRef, Param_FloatByRef, Param_CellByRef, Param_CellByRef, Param_Array, Param_Array, Param_Cell);
-
-	int iOffset = 0;
-	GETGAMEDATAOFFSET("CBaseEntity::Event_Killed", iOffset);
-	SH_MANUALHOOK_RECONFIGURE(MEvent_Killed, iOffset, 0, 0);
 
 	CREATEHANDLETYPE(AreasCollector);
 
@@ -317,6 +325,8 @@ void CBaseNPCExt::SDK_OnUnload()
 		SH_REMOVE_HOOK_ID(m_iLevelInitHookID);
 		m_iLevelInitHookID = 0;
 	}
+
+	g_CBaseNPCSendProxy.Shutdown();
 
 	if (m_bInitialized)
 	{

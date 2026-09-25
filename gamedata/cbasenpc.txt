@@ -740,19 +740,42 @@
 			}
 			"g_TouchTrace"  
 			{  
-				"library"   "server"  
-				"linux"     "@g_TouchTrace"  
+				"library"   	"server"  
+				"linux"     	"@g_TouchTrace"  
 			}
 			"TheNavMesh_Linux"
 			{
-				"library"	"server"
-				"linux"		"@TheNavMesh"
+				"library"		"server"
+				"linux"			"@TheNavMesh"
 			}
 
 			"TheNavAreas_Linux"
 			{
-				"library"	"server"
-				"linux"		"@TheNavAreas"
+				"library"		"server"
+				"linux"			"@TheNavAreas"
+			}
+			
+			//how to find: find by string ''SendTable_Init: called twice.''
+			"SendTable_Init"
+			{
+				"library"		"engine"
+				"windows"		"\x55\x8B\xEC\x51\x83\x3D\x2A\x2A\x2A\x2A\x00\x0F\x85\x2A\x2A\x2A\x2A\x53\x8B\x5D\x0C\x56\x57\x33\xFF\x85\xDB"
+				"linux"			"@_Z14SendTable_InitPP9SendTablei"
+			}
+			
+			//how to find: 
+			//you already found and renamed SendTable_Init, 
+			//it contains g_SendTableCRC,
+			//used once before CommandLine_Tier0(), something like DAT_XX = FUN_XX,
+			//raname DAT_XX to g_SendTableCRC and  FUN_XX to SendTable_ComputeCRC,
+			//go to xrefs of g_SendTableCRC, you will see 3 funcs,
+			//one of them sets g_SendTableCRC to 0 at very end of the function,
+			//the function that sets 0 for g_SendTableCRC is the func you want
+			"SendTable_Term"
+			{
+				"library"		"engine"
+				"windows"		"\x8B\x15\x2A\x2A\x2A\x2A\x56\x57\x8B\x3D\x2A\x2A\x2A\x2A\x33\xF6\x85\xFF\x7E\x2A\x8B\x04\xB2\x8B\x48\x0C\x85\xC9\x74\x2A\x8B\x01\x6A\x01\xFF\x10"
+				"linux"			"@_Z14SendTable_Termv"
 			}
 		}
 		"Addresses"
