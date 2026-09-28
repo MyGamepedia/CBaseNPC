@@ -1,3 +1,4 @@
+#include "shared/datamaplookup.h"
 
 #include "idatamapcontainer.h"
 #include "helpers.h"
@@ -225,38 +226,6 @@ inline int GetTypeDescOffs(typedescription_t *td)
 	return td->fieldOffset[TD_OFFSET_NORMAL];
 }
 
-// from sourcemod/core/HalfLife2.cpp
-bool UTIL_FindDataMapInfo(datamap_t *pMap, const char *name, sm_datatable_info_t *pDataTable)
-{
-	while (pMap)
-	{
-		for (int i = 0; i < pMap->dataNumFields; ++i)
-		{
-			if (pMap->dataDesc[i].fieldName == NULL)
-			{
-				continue;
-			}
-			if (strcmp(name, pMap->dataDesc[i].fieldName) == 0)
-			{
-				pDataTable->prop = &(pMap->dataDesc[i]);
-				pDataTable->actual_offset = GetTypeDescOffs(pDataTable->prop);
-				return true;
-			}
-			if (pMap->dataDesc[i].td == NULL || !UTIL_FindDataMapInfo(pMap->dataDesc[i].td, name, pDataTable))
-			{
-				continue;
-			}
-			
-			pDataTable->actual_offset += GetTypeDescOffs(&(pMap->dataDesc[i]));
-			return true;
-		}
-		
-		pMap = pMap->baseMap;
-	}
-
-	return false; 
-}
-
 bool IDataMapContainer::FindDataMapInfo(const char* name, sm_datatable_info_t *pDataTable, char* error, size_t maxlen)
 {
 	datamap_t* pDataMap = GetDataDescMap();
@@ -275,8 +244,10 @@ bool IDataMapContainer::FindDataMapInfo(const char* name, sm_datatable_info_t *p
 		return true;
 	}
 
-	if (UTIL_FindDataMapInfo( pDataMap, name, pDataTable ))
+	int actualOffset = -1;
+	if ((pDataTable->prop = CBaseNPCDataMapLookup::Find(pDataMap, name, &actualOffset)))
 	{
+		pDataTable->actual_offset = static_cast<unsigned int>(actualOffset);
 		m_DataMapCache.Insert(name, *pDataTable);
 		return true;
 	}

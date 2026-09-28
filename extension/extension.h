@@ -10,7 +10,7 @@
 #include <ISDKTools.h>
 #include <itoolentity.h>
 #include "helpers.h"
-#include "shared/npctools.h"
+#include "shared/ICBaseNPCTools.h"
 #include <datamap.h>
 #include <cstddef>
 

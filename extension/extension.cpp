@@ -5,6 +5,10 @@
 #include "helpers.h"
 #include "sourcesdk/cbasenpcsendproxy.h"
 #include "sourcesdk/cbasenpcserverclass.h"
+#if SOURCE_ENGINE == SE_BMS
+#include "client/cliententitymanager.h"
+#include "sourcesdk/cbasenpcrecvproxy.h"
+#endif
 #include "sourcesdk/nav_mesh.h"
 #if SOURCE_ENGINE == SE_TF2  
 #include "sourcesdk/tf_gamerules.h"  
@@ -47,7 +51,7 @@ IMDLCache* mdlcache = nullptr;
 CSharedEdictChangeInfo* g_pSharedChangeInfo = nullptr;
 IStaticPropMgrServer* staticpropmgr = nullptr;
 ConVar* sourcemod_version = nullptr;
-IBaseNPC_Tools* g_pBaseNPCTools = new BaseNPC_Tools_API;
+ICBaseNPCTools* g_pCBaseNPCTools = new BaseNPC_Tools_API;
 std::vector<sp_nativeinfo_t> gNatives;
 
 DEFINEHANDLEOBJ(AreasCollector, CUtlVector< CNavArea* >);
@@ -113,6 +117,32 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	}
 
 	bool bEdictSlotsAreNotAvailable = engine->GetEntityCount() < 1;
+#if SOURCE_ENGINE == SE_BMS
+	if (!g_ClientEntityManager.Initialize(g_pGameConf, error, maxlength) ||
+		(g_ClientEntityManager.IsAvailable() && !g_CBaseNPCRecvProxy.Init(error, maxlength)))
+	{
+		g_CBaseNPCRecvProxy.Shutdown();
+		g_ClientEntityManager.Shutdown();
+		g_CBaseNPCSendProxy.Shutdown();
+		return false;
+	}
+#endif
+
+	// SDK_OnUnload is not guaranteed after failed SDK_OnLoad. Roll back the
+	// client subsystem on every subsequent failure path as well.
+	bool loadSucceeded = false;
+	auto cleanupClient = [&loadSucceeded](void*)
+	{
+#if SOURCE_ENGINE == SE_BMS
+		if (!loadSucceeded)
+		{
+			g_CBaseNPCRecvProxy.Shutdown();
+			g_ClientEntityManager.Shutdown();
+		}
+#endif
+	};
+	std::unique_ptr<void, decltype(cleanupClient)> clientLoadGuard(this, cleanupClient);
+
 	if (!g_CBaseNPCServerClassManager.Init(g_pGameConf, error, maxlength))
 	{
 		g_CBaseNPCSendProxy.Shutdown();
@@ -167,7 +197,10 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	sharesys->AddDependency(myself, "sdktools.ext", true, true);
 	sharesys->AddDependency(myself, "sdkhooks.ext", true, true);
 	sharesys->RegisterLibrary(myself, "cbasenpc");
-	sharesys->AddInterface(myself, g_pBaseNPCTools);
+	sharesys->AddInterface(myself, g_pCBaseNPCTools);
+#if SOURCE_ENGINE == SE_BMS
+	sharesys->AddInterface(myself, &g_ClientEntityManager);
+#endif
 	
 	gNatives.reserve(1000);
 	natives::setup(gNatives);
@@ -188,6 +221,7 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 		m_iLevelInitHookID = SH_ADD_HOOK(IServerGameDLL, LevelInit, gamedll, SH_MEMBER(this, &CBaseNPCExt::Hook_LevelInit), false);
 	}
 
+	loadSucceeded = true;
 	return true;
 }
 
@@ -248,7 +282,7 @@ void CBaseNPCExt::OnEntityDestroyed(CBaseEntity* pEntity) {
 		return;
 	}
 
-	g_pBaseNPCTools->DeleteNPCByEntIndex(gamehelpers->EntityToBCompatRef(pEntity));
+	g_pCBaseNPCTools->DeleteNPCByEntIndex(gamehelpers->EntityToBCompatRef(pEntity));
 
 	auto iIndex = g_EntitiesHooks.Find(gamehelpers->EntityToReference(pEntity));
 	if (g_EntitiesHooks.IsValidIndex(iIndex)) {
@@ -335,6 +369,10 @@ void CBaseNPCExt::NotifyInterfaceDrop(SMInterface* interface) {
 
 void CBaseNPCExt::SDK_OnUnload()
 {
+#if SOURCE_ENGINE == SE_BMS
+	g_CBaseNPCRecvProxy.Shutdown();
+	g_ClientEntityManager.Shutdown();
+#endif
 	g_CBaseNPCServerClassManager.Shutdown();
 	if (m_iLevelInitHookID != 0)
 	{

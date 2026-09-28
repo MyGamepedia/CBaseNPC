@@ -3,7 +3,9 @@ import os
 files = [
   'cbasenpc_actiontest.sp',
   'cbasenpc_example.sp',
-  'cbasenpc_otis_sendprops_test.sp'
+  'cbasenpc_otis_sendprops_test.sp',
+  'cbasenpc_client_entities_test.sp',
+  'cbasenpc_client_properties_test.sp'
 ]
 
 # Some source archives omit the optional BMS nav test directory.

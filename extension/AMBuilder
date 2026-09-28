@@ -87,6 +87,10 @@ for sdk_name in Extension.sdks:
       ]
     elif sdk_name == 'bms':
       binary.sources += [
+        'client/cliententitymanager.cpp',
+        'client/cliententityproperties.cpp',
+        'client/cliententitynatives.cpp',
+        'sourcesdk/cbasenpcrecvproxy.cpp',
         'natives/bms/nav.cpp',
         'natives/bms/nav/area.cpp',
       ]

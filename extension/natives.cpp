@@ -1,3 +1,6 @@
+#if SOURCE_ENGINE == SE_BMS
+#include "client/cliententitynatives.h"
+#endif
 #include "natives.hpp"
 
 #include "natives/baseanimating.hpp"
@@ -161,6 +164,9 @@ cell_t Util_ConcatTransforms(IPluginContext* pContext, const cell_t* params) {
 
 
 void setup(std::vector<sp_nativeinfo_t>& natives) {
+#if SOURCE_ENGINE == SE_BMS
+	setupClientEntityNatives(natives);
+#endif
 
 	baseanimating::setup(natives);
 	baseanimatingoverlay::setup(natives);

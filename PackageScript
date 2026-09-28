@@ -9,6 +9,7 @@ builder.SetBuildFolder('package')
 # Add any folders you need to this list
 folder_list = [
   'addons/sourcemod/extensions',
+  'addons/sourcemod/scripting',
   'addons/sourcemod/scripting/include',
   'addons/sourcemod/scripting/include/cbasenpc',
   'addons/sourcemod/scripting/include/cbasenpc/tf',
@@ -54,3 +55,8 @@ CopyDirContent('scripting/include/cbasenpc/nextbot/path', 'addons/sourcemod/scri
 CopyDirContent('gamedata', 'addons/sourcemod/gamedata')
 
 #shutil.make_archive(builder.buildFolder, 'gztar', builder.buildFolder)
+# Ship test sources alongside disabled test binaries; no second extension.
+CopyFiles('scripting', 'addons/sourcemod/scripting', [
+  'cbasenpc_client_entities_test.sp',
+  'cbasenpc_client_properties_test.sp',
+])
