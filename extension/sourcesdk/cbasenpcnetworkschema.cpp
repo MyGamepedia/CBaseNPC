@@ -60,6 +60,11 @@ void ReceiveClassname(const CRecvProxyData* data, void* object, void*)
 { if (data) g_ClientEntityManager.ReceiveClassname(object, data->m_Value.m_pString); }
 #endif
 }
+void CBaseNPCNetworkSchemaManager::ConfigureLoad(bool lateLoad, bool entitiesExist)
+{
+ lateLoad_ = lateLoad;
+ if (lateLoad && entitiesExist) g_CBaseNPCServerClassManager.BlockRegistrationForLateLoad();
+}
 bool CBaseNPCNetworkSchemaManager::Finalize(char* error, size_t maxlength)
 {
  if (finalized_) return true;
@@ -71,13 +76,24 @@ bool CBaseNPCNetworkSchemaManager::Finalize(char* error, size_t maxlength)
 #if SOURCE_ENGINE == SE_BMS
    localClient = g_ClientEntityManager.IsAvailable();
 #endif
-   char detail[1024] = {};
-   if (!g_CBaseNPCServerClassManager.Prepare(localClient, detail, sizeof(detail))) throw std::runtime_error(detail);
+   bool entitiesExist = engine->GetEntityCount() > 0;
 #if SOURCE_ENGINE == SE_BMS
-   if (!g_CBaseNPCClientClassManager.Prepare(detail, sizeof(detail))) throw std::runtime_error(detail);
+   entitiesExist = entitiesExist || (localClient && g_ClientEntityManager.GetClientEntityCount() > 0);
+#endif
+   bool customNetworking = g_CBaseNPCServerClassManager.HasInstalledNetworkDeclarations();
+#if SOURCE_ENGINE == SE_BMS
+   customNetworking = customNetworking || g_CBaseNPCClientClassManager.HasInstalledNetworkDeclarations();
+#endif
+   const bool inertLateLoad = lateLoad_ && entitiesExist && !customNetworking;
+   if (lateLoad_ && entitiesExist && customNetworking)
+     throw std::runtime_error("Dynamic network declarations cannot be finalized after a late extension load with existing entities; restart the game/server with CBaseNPC and its plugins loaded before map startup");
+   char detail[1024] = {};
+   if (!g_CBaseNPCServerClassManager.Prepare(localClient && !inertLateLoad, detail, sizeof(detail))) throw std::runtime_error(detail);
+#if SOURCE_ENGINE == SE_BMS
+   if (!g_CBaseNPCClientClassManager.Prepare(inertLateLoad, detail, sizeof(detail))) throw std::runtime_error(detail);
 #endif
    auto head = g_CBaseNPCServerClassManager.GetCombinedHead();
-   if (head) {
+   if (head && !inertLateLoad) {
      bridge.reset(new ClassnameBridge);
      std::set<SendTable*> seen;
      for (auto sc = head; sc && !bridge->send; sc = sc->m_pNext) bridge->send = FindBase(sc->m_pTable, seen);
@@ -134,6 +150,7 @@ bool CBaseNPCNetworkSchemaManager::Finalize(char* error, size_t maxlength)
    if (!g_CBaseNPCClientClassManager.Commit(detail, sizeof(detail))) throw std::runtime_error(detail);
 #endif
    finalized_ = true;
+   if (inertLateLoad) g_pSM->LogMessage(myself, "Late CBaseNPC load detected after entity creation with no custom network declarations; dynamic schema and classname bridge were left untouched.");
    if (published_ && !localClient) g_pSM->LogMessage(myself, "Dynamic SendTables/classname replication published on dedicated server. Remote clients REQUIRE the identical CBaseNPC client schema.");
    return true;
  } catch (const std::exception& ex) {

@@ -137,6 +137,10 @@ void CBaseNPCRecvTable::Receive(const CRecvProxyData* data, void* object, void*)
    size_t n = 0; while (n + 1 < field->elementSize && text[n]) ++n;
    memcpy(out, text, n); out[n] = 0; break;
  }
+ case Kind::Color32: {
+   uint32_t color = LittleDWord(static_cast<uint32_t>(data->m_Value.m_Int));
+   memcpy(out, &color, sizeof(color)); break;
+ }
  case Kind::EHandle:
    // BMS packs the network handle using MAX_EDICT_BITS; the in-memory
    // CBaseHandle uses NUM_ENT_ENTRY_BITS. Do not memcpy the wire integer.

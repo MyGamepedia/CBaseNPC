@@ -1,8 +1,10 @@
 #ifndef CBASENPC_TOOLS_H
 #define CBASENPC_TOOLS_H
 
-#define SMINTERFACE_CBASENPC_TOOLS_NAME		"ICBaseNPCTools"
-#define SMINTERFACE_CBASENPC_TOOLS_VERSION	1
+// Keep the established binary identity used by existing dependent extensions.
+// Renaming the C++ wrapper must not create an incompatible ShareSys interface.
+#define SMINTERFACE_CBASENPC_TOOLS_NAME		"NPCTools"
+#define SMINTERFACE_CBASENPC_TOOLS_VERSION	2
 #define MAX_NPCS						200
 #define INVALID_NPC_ID					-1
 

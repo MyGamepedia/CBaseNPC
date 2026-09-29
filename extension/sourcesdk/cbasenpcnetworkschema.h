@@ -9,12 +9,14 @@ constexpr size_t CBASENPC_NETWORK_CLASSNAME_LENGTH = 512;
 class CBaseNPCNetworkSchemaManager
 {
 public:
+ void ConfigureLoad(bool lateLoad, bool entitiesExist);
  bool Finalize(char* error, size_t maxlength);
  bool IsFinalized() const { return finalized_ && !failed_; }
  bool IsPublished() const { return published_; }
  void StopAfterUnload() { failed_ = true; }
 private:
  bool attempted_ = false, finalized_ = false, failed_ = false, published_ = false;
+ bool lateLoad_ = false;
 };
 extern CBaseNPCNetworkSchemaManager g_CBaseNPCNetworkSchemaManager;
 #endif

@@ -138,7 +138,9 @@ struct CBaseNPCServerClassManager::State
 	bool failed = false;
 	bool published = false;
 	bool stopped = false;
+	bool registrationBlocked = false;
 	std::string failure;
+	std::string registrationFailure;
 };
 
 CBaseNPCServerClassManager g_CBaseNPCServerClassManager;
@@ -200,12 +202,29 @@ void CBaseNPCServerClassManager::Shutdown()
 
 bool CBaseNPCServerClassManager::IsRegistrationOpen() const
 {
-	return m_State && m_State->available && !m_State->attempted && !m_State->stopped;
+	return m_State && m_State->available && !m_State->attempted && !m_State->stopped && !m_State->registrationBlocked;
 }
 const char* CBaseNPCServerClassManager::RegistrationError() const
 {
+	if (m_State && m_State->registrationBlocked) return m_State->registrationFailure.c_str();
 	if (!m_State || !m_State->available) return "Dynamic networking is available only in the BMS build with SendTable_Init/Term gamedata";
 	return "CBaseNPC network tables are finalized or failed. Register during initial plugin startup; restart the game/server after installing this plugin.";
+}
+void CBaseNPCServerClassManager::BlockRegistrationForLateLoad()
+{
+	if (!m_State || m_State->attempted) return;
+	m_State->registrationBlocked = true;
+	m_State->registrationFailure = "Dynamic ServerClass/ClientClass registration is unavailable after a late extension load with existing entities; restart the game/server with CBaseNPC and its plugins loaded before map startup";
+}
+bool CBaseNPCServerClassManager::HasInstalledNetworkDeclarations() const
+{
+	for (int i = 0; g_pPluginEntityFactories && i < g_pPluginEntityFactories->m_Factories.Count(); ++i)
+	{
+		auto factory = g_pPluginEntityFactories->m_Factories[i];
+		if (factory && factory->m_bInstalled &&
+			(factory->HasServerClassDeclaration() || !factory->m_SendFields.empty())) return true;
+	}
+	return false;
 }
 bool CBaseNPCServerClassManager::IsFinalized() const { return m_State && m_State->finalized && !m_State->failed && !m_State->stopped; }
 bool CBaseNPCServerClassManager::HasFailed() const { return m_State && m_State->failed; }
@@ -245,6 +264,7 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 		for (int i = 0; i < g_pPluginEntityFactories->m_Factories.Count(); ++i)
 		{
 			auto factory = g_pPluginEntityFactories->m_Factories[i];
+			if (!factory || !factory->m_bInstalled) continue;
 			if (!factory->m_SendFields.empty() && !factory->HasServerClassDeclaration())
 				throw std::runtime_error(factory->m_iClassname + ": network fields require DefineServerClass()");
 			if (!factory->HasServerClassDeclaration()) continue;

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include <mathlib/mathlib.h>
 #include <string_t.h>
@@ -345,11 +346,12 @@ void CBaseNPCSendProxy::Color32ToInt(
 	(void)objectID;
 
 	const color32* color = reinterpret_cast<const color32*>(pData);
-	const uint32_t packed =
-		(static_cast<uint32_t>(color->r) << 24) |
-		(static_cast<uint32_t>(color->g) << 16) |
-		(static_cast<uint32_t>(color->b) << 8) |
-		static_cast<uint32_t>(color->a);
+	uint32_t packed;
+	// The engine treats color32 as four native RGBA bytes, not as an
+	// RRGGBBAA integer assembled with shifts. Convert that native word to the
+	// little-endian wire integer so the byte order survives on every host.
+	memcpy(&packed, color, sizeof(packed));
+	packed = LittleDWord(packed);
 
 	pOut->m_Int = static_cast<int>(packed);
 }

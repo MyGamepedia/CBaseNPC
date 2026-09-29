@@ -164,6 +164,12 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 		return false;
 	}
 #endif
+	bool existingNetworkEntities = engine->GetEntityCount() > 0;
+#if SOURCE_ENGINE == SE_BMS
+	existingNetworkEntities = existingNetworkEntities ||
+		(g_ClientEntityManager.IsAvailable() && g_ClientEntityManager.GetClientEntityCount() > 0);
+#endif
+	g_CBaseNPCNetworkSchemaManager.ConfigureLoad(late, existingNetworkEntities);
 
 	if (bEdictSlotsAreNotAvailable) //we loaded early - can't create edicts to get datamaps from their methods, try to scan memory for datamaps instead
 	{

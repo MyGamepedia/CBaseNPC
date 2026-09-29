@@ -99,7 +99,7 @@ struct CBaseNPCClientClassManager::State
  std::vector<Creation> creationStack;
  ClientClass* head = nullptr;
  int hook = 0;
- bool prepared = false, published = false, finalized = false, failed = false;
+ bool prepared = false, published = false, finalized = false, failed = false, inert = false;
 };
 CBaseNPCClientClassManager g_CBaseNPCClientClassManager;
 CBaseNPCClientClassManager::CBaseNPCClientClassManager() = default;
@@ -146,18 +146,29 @@ ClientClass* CBaseNPCClientClassManager::FindStockOrCustomClass(const char* name
  for (auto& cc : m_State->classes) if (!Q_stricmp(name, cc->storage.m_pNetworkName)) return cc->Get();
  return nullptr;
 }
-bool CBaseNPCClientClassManager::Prepare(char* error, size_t maxlength)
+bool CBaseNPCClientClassManager::HasInstalledNetworkDeclarations() const
+{
+ for (auto factory : g_PluginClientEntityFactories.All())
+   if (factory && factory->installed) return true;
+ return false;
+}
+bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxlength)
 {
  if (!m_State) return true; // Dedicated: declarations are inert, no client module access.
  auto& s = *m_State;
  if (s.prepared || s.failed) return Error(error, maxlength, "Client schema already prepared or failed; restart required");
  try {
+   if (inert) {
+     s.inert = true;
+     s.prepared = true;
+     return true;
+   }
    if (engine->GetEntityCount() > 0 || g_ClientEntityManager.GetClientEntityCount())
      throw std::runtime_error("Client schema registration is too late: entities already exist; restart required");
    std::map<std::string, CPluginEntityFactory*, CaseInsensitiveCompare> servers;
    for (int i = 0; i < g_pPluginEntityFactories->m_Factories.Count(); ++i) {
      auto factory = g_pPluginEntityFactories->m_Factories[i];
-     if (factory->HasServerClassDeclaration()) servers.emplace(factory->m_NetworkName, factory);
+     if (factory && factory->m_bInstalled && factory->HasServerClassDeclaration()) servers.emplace(factory->m_NetworkName, factory);
    }
    std::map<std::string, CPluginClientEntityFactory*, CaseInsensitiveCompare> declarations;
    std::set<std::string, CaseInsensitiveCompare> tableNames;
@@ -233,6 +244,7 @@ bool CBaseNPCClientClassManager::Prepare(char* error, size_t maxlength)
 void CBaseNPCClientClassManager::Publish()
 {
  if (!m_State || !m_State->prepared || m_State->failed) return;
+ if (m_State->inert) return;
  m_State->published = true;
  for (auto& cc : m_State->classes) cc->factory->frozen = true;
 }
@@ -241,6 +253,7 @@ bool CBaseNPCClientClassManager::Commit(char* error, size_t maxlength)
  if (!m_State) return true;
  auto& s = *m_State;
  if (s.finalized) return true;
+ if (s.inert) { s.finalized = true; return true; }
  if (!s.published || s.failed) return Error(error, maxlength, "client schema was not published");
  s.term(true);
  if (!s.init(s.roots.data(), int(s.roots.size()))) {

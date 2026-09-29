@@ -32,10 +32,11 @@ public:
  ~CBaseNPCClientClassManager();
  bool Init(SourceMod::IGameConfig* config, char* error, size_t maxlength);
  void Shutdown();
- bool Prepare(char* error, size_t maxlength);
+ bool Prepare(bool inert, char* error, size_t maxlength);
  void Publish();
  bool Commit(char* error, size_t maxlength);
  bool IsFinalized() const;
+ bool HasInstalledNetworkDeclarations() const;
  ClientClass* GetCombinedHead() const;
  ClientClass* FindStockOrCustomClass(const char* name) const;
  ClientClass* Hook_GetAllClasses();

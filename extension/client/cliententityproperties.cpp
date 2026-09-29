@@ -190,6 +190,11 @@ bool ResolveDataElement(IPluginContext *context, const char *name,
   return true;
 }
 
+bool RecvTypeMatches(SendPropType actual, SendPropType expected)
+{
+  return actual == expected || (expected == DPT_Vector && actual == DPT_VectorXY);
+}
+
 bool ResolveRecvElement(IPluginContext *context, const char *name,
                         const RecvPropInfo &info, int element,
                         SendPropType expectedType, const char *expectedName,
@@ -205,7 +210,7 @@ bool ResolveRecvElement(IPluginContext *context, const char *name,
       context->ThrowNativeError("Element %d is out of bounds (sidecar %s has %u elements)", element, name, unsigned(field->elementCount)); return false;
     }
     if (prop->GetType() == DPT_DataTable) prop = prop->GetDataTable()->GetProp(element);
-    if (prop->GetType() != expectedType && !(expectedType == DPT_Vector && prop->GetType() == DPT_VectorXY)) {
+    if (!RecvTypeMatches(prop->GetType(), expectedType)) {
       context->ThrowNativeError("Sidecar field %s is not %s", name, expectedName); return false;
     }
     if (!strcmp(expectedName, "entity handle") && field->kind != CBaseNPCSendFieldKind::EHandle) {
@@ -217,7 +222,7 @@ bool ResolveRecvElement(IPluginContext *context, const char *name,
     return true;
   }
 
-  if (prop->GetType() == expectedType)
+  if (RecvTypeMatches(prop->GetType(), expectedType))
   {
     if (element != 0)
     {
@@ -246,7 +251,7 @@ bool ResolveRecvElement(IPluginContext *context, const char *name,
       context->ThrowNativeError("RecvProp %s has no ArrayProp", name);
       return false;
     }
-    if (arrayProp->GetType() != expectedType)
+    if (!RecvTypeMatches(arrayProp->GetType(), expectedType))
     {
       context->ThrowNativeError("RecvProp %s type is not %s (%d != %d)",
                                 name, expectedName, arrayProp->GetType(), expectedType);
@@ -277,7 +282,7 @@ bool ResolveRecvElement(IPluginContext *context, const char *name,
     }
 
     RecvProp *elementProp = table->GetProp(element);
-    if (!elementProp || elementProp->GetType() != expectedType)
+    if (!elementProp || !RecvTypeMatches(elementProp->GetType(), expectedType))
     {
       context->ThrowNativeError("RecvProp %s element %d type is not %s",
                                 name, element, expectedName);

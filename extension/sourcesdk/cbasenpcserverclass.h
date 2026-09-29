@@ -22,6 +22,8 @@ public:
 	bool HasFailed() const;
 	bool IsRegistrationOpen() const;
 	const char* RegistrationError() const;
+	void BlockRegistrationForLateLoad();
+	bool HasInstalledNetworkDeclarations() const;
 	ServerClass* GetCombinedHead() const;
 	ServerClass* FindStockOrCustomClass(const char* name) const;
 	ServerClass* Hook_GetAllServerClasses();
