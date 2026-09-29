@@ -16,6 +16,10 @@ class ICBaseNPCClientEntityListener
 {
 public:
   virtual ~ICBaseNPCClientEntityListener() = default;
+  // Networked creation is delivered after initial decode at FRAME_NET_UPDATE_END.
+  // Client-only creation is immediate; seeding existing entities is silent.
+  // Classname prefers the per-instance value received from the server, not a
+  // direct server-entity lookup. Hold a proper handle ref across callbacks.
   virtual void OnClientEntityCreated(void *entity, int clientRef, const char *classname) {}
   virtual void OnClientEntityDestroyed(void *entity, int clientRef) {}
 };

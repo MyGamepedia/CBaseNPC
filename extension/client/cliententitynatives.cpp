@@ -121,11 +121,11 @@ cell_t Native_GetEntityClassnameDiagnosticsClient(IPluginContext *context,
   const char *networkName = nullptr;
   const char *mapClassname = nullptr;
   const char *clientClassname = nullptr;
-  const char *serverClassname = nullptr;
+  const char *replicatedClassname = nullptr;
   const char *classname = nullptr;
   if (!g_ClientEntityManager.GetEntityClassnameDiagnostics(
         params[1], &entIndex, &networkName, &mapClassname,
-        &clientClassname, &serverClassname, &classname))
+        &clientClassname, &replicatedClassname, &classname))
   {
     return 0;
   }
@@ -137,7 +137,7 @@ cell_t Native_GetEntityClassnameDiagnosticsClient(IPluginContext *context,
   *entIndexOutput = entIndex;
 
   const char *outputs[] = {
-    networkName, mapClassname, clientClassname, serverClassname, classname
+    networkName, mapClassname, clientClassname, replicatedClassname, classname
   };
   for (size_t i = 0; i < sizeof(outputs) / sizeof(outputs[0]); ++i)
   {
@@ -147,6 +147,21 @@ cell_t Native_GetEntityClassnameDiagnosticsClient(IPluginContext *context,
     if (error != SP_ERROR_NONE)
       return context->ThrowNativeErrorEx(error, "Could not write classname diagnostics");
   }
+  return 1;
+}
+
+cell_t Native_GetRuntimeDiagnostics(IPluginContext* context, const cell_t* params)
+{
+  bool runtime = false; size_t size = 0; const char *table = "", *physical = "";
+  if (!g_ClientEntityManager.GetRuntimeDiagnostics(params[1], runtime, size, table, physical)) return 0;
+  cell_t *runtimeOut = nullptr, *sizeOut = nullptr;
+  if (context->LocalToPhysAddr(params[2], &runtimeOut) != SP_ERROR_NONE ||
+      context->LocalToPhysAddr(params[3], &sizeOut) != SP_ERROR_NONE)
+    return context->ThrowNativeError("Could not write runtime diagnostics");
+  *runtimeOut = runtime; *sizeOut = static_cast<cell_t>(size);
+  if (context->StringToLocalUTF8(params[4], params[5], table, nullptr) != SP_ERROR_NONE ||
+      context->StringToLocalUTF8(params[6], params[7], physical, nullptr) != SP_ERROR_NONE)
+    return context->ThrowNativeError("Could not write runtime class/table names");
   return 1;
 }
 
@@ -179,6 +194,7 @@ void natives::setupClientEntityNatives(std::vector<sp_nativeinfo_t> &natives)
     {"CClientEntity.GetEntIndex", Native_EntRefToEntIndexClient},
     {"CClientEntity.GetClassname", Native_GetEntityClassnameClient},
     {"CClientEntity.GetClassnameDiagnostics", Native_GetEntityClassnameDiagnosticsClient},
+    {"CClientEntity.GetRuntimeDiagnostics", Native_GetRuntimeDiagnostics},
     {"CClientEntityManager.FindByClassname", Native_FindEntityByClassnameClient},
     {"CClientEntityManager.IsAvailable", Native_IsAvailable},
     {"CClientEntity.GetHandleRef", Native_GetHandleRef}

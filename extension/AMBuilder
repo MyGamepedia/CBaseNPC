@@ -36,6 +36,7 @@ project.sources = [
   'sourcesdk/cbasenpcsendproxy.cpp',
   'sourcesdk/cbasenpcsendtable.cpp',
   'sourcesdk/cbasenpcserverclass.cpp',
+  'sourcesdk/cbasenpcnetworkschema.cpp',
   'sourcesdk/servernetworkproperty.cpp',
   'sourcesdk/collisionproperty.cpp',
   'sourcesdk/tracefilter_simple.cpp',
@@ -91,6 +92,9 @@ for sdk_name in Extension.sdks:
         'client/cliententityproperties.cpp',
         'client/cliententitynatives.cpp',
         'sourcesdk/cbasenpcrecvproxy.cpp',
+        'sourcesdk/cbasenpcrecvtable.cpp',
+        'sourcesdk/cbasenpcclientclass.cpp',
+        'client/plugincliententityfactory.cpp',
         'natives/bms/nav.cpp',
         'natives/bms/nav/area.cpp',
       ]

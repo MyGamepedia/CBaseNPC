@@ -250,12 +250,18 @@ public Extension __ext_cbasenpc =
 };
 #if defined CBASENPC_BLACKMESA
 #include <cbasenpc/bms/cliententity>
+#include <cbasenpc/bms/entityfactoryclient>
 #endif
 
 #if !defined REQUIRE_EXTENSIONS && defined CBASENPC_BLACKMESA
 public void __ext_cbasenpc_SetNTVOptional()
 {
   MarkNativeAsOptional("CClientEntity.GetAddress");
+  MarkNativeAsOptional("CClientEntity.GetRuntimeDiagnostics");
+  MarkNativeAsOptional("CEntityFactoryClient.CEntityFactoryClient");
+  MarkNativeAsOptional("CEntityFactoryClient.DefineClientClass");
+  MarkNativeAsOptional("CEntityFactoryClient.DeriveFromNetworkClass");
+  MarkNativeAsOptional("CEntityFactoryClient.Install");
   MarkNativeAsOptional("CClientEntityManager.FromAddress");
   MarkNativeAsOptional("CClientEntityManager.GetCount");
   MarkNativeAsOptional("CClientEntityManager.GetByOrdinal");

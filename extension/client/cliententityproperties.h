@@ -5,6 +5,7 @@
 #include <dt_recv.h>
 #include <string>
 #include <unordered_map>
+struct CBaseNPCRecvField;
 
 struct ClientDataMapInfo
 {
@@ -15,6 +16,7 @@ struct ClientRecvPropInfo
 {
   RecvProp *prop = nullptr;
   int actualOffset = -1;
+  const CBaseNPCRecvField* sidecar = nullptr;
 };
 
 // Owned by CClientEntityManager. Cache keys refer to metadata, never entities.

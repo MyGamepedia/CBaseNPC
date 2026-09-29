@@ -1,5 +1,7 @@
 #include "cliententitymanager.h"
 #include "sourcesdk/cbasenpcclientlookup.h"
+#include "sourcesdk/cbasenpcclientclass.h"
+#include "sourcesdk/cbasenpcnetworkschema.h"
 #include <cstdio>
 
 #include <algorithm>
@@ -40,6 +42,13 @@ bool ClassnameMatches(const std::string &candidate, const char *pattern)
 #endif
 
 CClientEntityManager g_ClientEntityManager;
+
+#ifndef CBASENPC_CLIENT_TESTS
+SH_DECL_HOOK0(IClientNetworkable, GetClientClass, SH_NOATTRIB, 0, ClientClass*);
+SH_DECL_HOOK0_void(IClientNetworkable, Release, SH_NOATTRIB, 0);
+SH_DECL_HOOK1_void(IBaseClientDLL, FrameStageNotify, SH_NOATTRIB, 0, ClientFrameStage_t);
+SH_DECL_HOOK0_void(IBaseClientDLL, LevelShutdown, SH_NOATTRIB, 0);
+#endif
 
 bool CClientEntityManager::Initialize(SourceMod::IGameConfig *gameConfig,
                                       char *error, size_t maxlength)
@@ -88,6 +97,13 @@ bool CClientEntityManager::Initialize(SourceMod::IGameConfig *gameConfig,
   }
 
   available_ = true;
+#ifndef CBASENPC_CLIENT_TESTS
+  frameStageHook_ = SH_ADD_HOOK(IBaseClientDLL, FrameStageNotify, clientDll_, SH_MEMBER(this, &CClientEntityManager::Hook_FrameStageNotify), true);
+  levelShutdownHook_ = SH_ADD_HOOK(IBaseClientDLL, LevelShutdown, clientDll_, SH_MEMBER(this, &CClientEntityManager::Hook_LevelShutdown), false);
+  if (!frameStageHook_ || !levelShutdownHook_) {
+    smutils->Format(error, maxlength, "Could not hook client frame/level lifecycle"); Shutdown(); return false;
+  }
+#endif
   SeedExistingEntities();
   g_pSM->LogMessage(myself,
     "CBaseNPC client entity subsystem initialized: %d existing client entities, "
@@ -260,7 +276,7 @@ void CClientEntityManager::SeedExistingEntities()
 
 void CClientEntityManager::TrackEntity(C_BaseEntity *entity, bool notify)
 {
-  if (!available_ || !entity || entities_.find(entity) != entities_.end())
+  if (!available_ || purging_ || !entity || entities_.find(entity) != entities_.end())
     return;
 
   auto *unknown = reinterpret_cast<IClientUnknown *>(entity);
@@ -273,23 +289,47 @@ void CClientEntityManager::TrackEntity(C_BaseEntity *entity, bool notify)
   EntityRecord record;
   record.clientRef = entIndex >= 0 ? entIndex : handle.ToInt();
   record.handleValue = static_cast<uint32_t>(handle.ToInt());
-  record.clientClassname = ReadClientClassname(entity);
-  record.serverClassname = ReadServerClassname(entIndex);
-  if (!record.serverClassname.empty())
-    record.classname = record.serverClassname;
-  else if (!record.clientClassname.empty())
-    record.classname = record.clientClassname;
-  else
-    record.classname = "C_BaseEntity";
+  record.classname = "C_BaseEntity";
 
-  const int clientRef = record.clientRef;
   const uint32_t handleValue = record.handleValue;
-  const std::string classname = record.classname;
+  record.createdNotified = !notify;
   entities_.emplace(entity, std::move(record));
   entityOrder_.push_back(entity);
 
+#ifndef CBASENPC_CLIENT_TESTS
+  if (auto runtime = g_CBaseNPCClientClassManager.ActiveCreation(entIndex, handle.GetSerialNumber()))
+    AttachRuntime(entity, runtime);
+#endif
+
+  // Runtime identity must be installed before consulting IClientTools: its
+  // classname accessor can itself call the virtual GetClientClass().
+  auto tracked = entities_.find(entity);
+  if (tracked != entities_.end() && !tracked->second.runtimeClass) {
+    const auto clientName = ReadClientClassname(entity);
+    tracked = entities_.find(entity);
+    if (tracked == entities_.end() || tracked->second.handleValue != handleValue) return;
+    tracked->second.clientClassname = clientName;
+    if (!clientName.empty()) tracked->second.classname = clientName;
+  }
+
   if (!notify)
     return;
+
+  if (entIndex >= 0) {
+    pendingCreates_.push_back({entity, handleValue});
+    return;
+  }
+  NotifyCreated(entity, handleValue);
+}
+
+void CClientEntityManager::NotifyCreated(C_BaseEntity* entity, uint32_t handleValue)
+{
+  auto found = entities_.find(entity);
+  if (!available_ || found == entities_.end() || found->second.handleValue != handleValue ||
+      found->second.deleting || found->second.createdNotified) return;
+  found->second.createdNotified = true;
+  const int clientRef = found->second.clientRef;
+  const std::string classname = found->second.classname;
 
   if (onEntityCreated_)
   {
@@ -343,22 +383,6 @@ std::string CClientEntityManager::ReadClientClassname(C_BaseEntity *entity) cons
   return classname;
 }
 
-std::string CClientEntityManager::ReadServerClassname(int entIndex) const
-{
-  if (entIndex < 0)
-    return {};
-
-  CBaseEntity *serverEntity = gamehelpers->ReferenceToEntity(entIndex);
-  if (!serverEntity)
-    return {};
-
-  const char *classname = gamehelpers->GetEntityClassname(serverEntity);
-  if (!classname || classname[0] == '\0')
-    return {};
-
-  return classname;
-}
-
 void CClientEntityManager::OnEntityCreated(C_BaseEntity *entity)
 {
   TrackEntity(entity, true);
@@ -372,8 +396,10 @@ void CClientEntityManager::OnEntityDeleted(C_BaseEntity *entity)
   found->second.deleting = true;
   const int clientRef = found->second.clientRef;
   const uint32_t handleValue = found->second.handleValue;
+  const bool notify = found->second.createdNotified;
+  CleanupRuntime(entity);
 
-  if (onEntityDestroyed_)
+  if (notify && onEntityDestroyed_)
   {
     onEntityDestroyed_->PushCell(clientRef);
     onEntityDestroyed_->Execute(nullptr);
@@ -381,6 +407,7 @@ void CClientEntityManager::OnEntityDeleted(C_BaseEntity *entity)
   const auto snapshot = listeners_;
   for (auto *listener : snapshot)
   {
+    if (!notify) break;
     if (!available_) break;
     if (listener && std::find(listeners_.begin(), listeners_.end(), listener) != listeners_.end())
       listener->OnClientEntityDestroyed(entity, clientRef);
@@ -537,7 +564,7 @@ int CClientEntityManager::FindClientEntityByClassname(
 
 bool CClientEntityManager::GetEntityClassnameDiagnostics(
   int clientRef, int *entIndex, const char **networkName, const char **mapClassname,
-  const char **clientClassname, const char **serverClassname, const char **classname)
+  const char **clientClassname, const char **replicatedClassname, const char **classname)
 {
   auto *entity = static_cast<C_BaseEntity *>(ResolveClientEntityRef(clientRef));
   if (!entity)
@@ -561,8 +588,8 @@ bool CClientEntityManager::GetEntityClassnameDiagnostics(
       ? clientClass->m_pMapClassname : "";
   if (clientClassname)
     *clientClassname = found->second.clientClassname.c_str();
-  if (serverClassname)
-    *serverClassname = found->second.serverClassname.c_str();
+  if (replicatedClassname)
+    *replicatedClassname = found->second.replicatedClassname.c_str();
   if (classname)
     *classname = found->second.classname.c_str();
   return true;
@@ -751,12 +778,20 @@ RecvProp *CClientEntityManager::FindRecvProp(const char *networkClassName,
                                             const char *propName, int *actualOffset) const
 {
   ClientClass *cc = FindClientClass(networkClassName);
-  return CBaseNPCClientLookup::FindProp(cc ? cc->m_pRecvTable : nullptr, propName, actualOffset);
+  auto prop = CBaseNPCClientLookup::FindProp(cc ? cc->m_pRecvTable : nullptr, propName, actualOffset);
+  if (actualOffset && CBaseNPCRecvTable::IsCustom(prop)) *actualOffset = -1;
+  return prop;
 }
 
 void CClientEntityManager::Shutdown()
 {
+  PurgeEntities();
   available_ = false;
+#ifndef CBASENPC_CLIENT_TESTS
+  if (frameStageHook_) SH_REMOVE_HOOK_ID(frameStageHook_);
+  if (levelShutdownHook_) SH_REMOVE_HOOK_ID(levelShutdownHook_);
+#endif
+  frameStageHook_ = levelShutdownHook_ = 0;
   UnregisterEngineListener();
   if (onEntityCreated_)
   {
@@ -781,3 +816,132 @@ void CClientEntityManager::Shutdown()
   subRemoveOffset_ = -1;
   allocPooledStringClient_ = nullptr;
 }
+
+void CClientEntityManager::DetachPluginConsumers()
+{
+  listeners_.clear();
+  if (onEntityCreated_) forwards->ReleaseForward(onEntityCreated_);
+  if (onEntityDestroyed_) forwards->ReleaseForward(onEntityDestroyed_);
+  onEntityCreated_ = onEntityDestroyed_ = nullptr;
+}
+
+unsigned char* CClientEntityManager::GetSidecarAddress(void* entity, size_t offset, size_t size)
+{
+  auto found = entities_.find(static_cast<C_BaseEntity*>(entity));
+  if (!available_ || found == entities_.end() || !found->second.sidecar ||
+      offset > found->second.sidecarSize || size > found->second.sidecarSize - offset) return nullptr;
+  return found->second.sidecar.get() + offset;
+}
+
+bool CClientEntityManager::AttachRuntime(C_BaseEntity* entity, CBaseNPCRuntimeClientClass* runtime)
+{
+  if (!entity || !runtime) return false;
+  // Normally attached from the raw client-list callback inside stock Init().
+  if (entities_.find(entity) == entities_.end()) TrackEntity(entity, true);
+  auto found = entities_.find(entity);
+  if (found == entities_.end() || found->second.deleting || found->second.removeNotified) return false;
+  auto& record = found->second;
+  if (record.runtimeClass) return record.runtimeClass == runtime && record.classHook && record.releaseHook;
+  auto net = reinterpret_cast<IClientUnknown*>(entity)->GetClientNetworkable();
+  if (!net) return false;
+  record.sidecarSize = runtime->SidecarSize();
+  record.sidecar.reset(new unsigned char[record.sidecarSize ? record.sidecarSize : 1]());
+  CBaseNPCRecvTable::InitializeStorage(runtime->table->GetTable(), record.sidecar.get(), record.sidecarSize);
+  record.runtimeClass = runtime;
+#ifndef CBASENPC_CLIENT_TESTS
+  record.classHook = SH_ADD_HOOK(IClientNetworkable, GetClientClass, net, SH_MEMBER(this, &CClientEntityManager::Hook_GetClientClass), false);
+  record.releaseHook = SH_ADD_HOOK(IClientNetworkable, Release, net, SH_MEMBER(this, &CClientEntityManager::Hook_Release), false);
+#else
+  record.classHook = record.releaseHook = 1;
+#endif
+  if (!record.classHook || !record.releaseHook) { CleanupRuntime(entity); return false; }
+  record.clientClassname = runtime->storage.m_pMapClassname;
+  if (record.replicatedClassname.empty()) record.classname = record.clientClassname;
+  return true;
+}
+void CClientEntityManager::RunPostConstructor(C_BaseEntity* entity)
+{
+  auto found = entities_.find(entity);
+  if (found == entities_.end() || !found->second.runtimeClass || found->second.postConstructed || found->second.deleting) return;
+  found->second.postConstructed = true;
+  auto factory = found->second.runtimeClass->factory;
+  if (factory) factory->Constructed(found->second.clientRef);
+}
+void CClientEntityManager::CleanupRuntime(C_BaseEntity* entity)
+{
+  auto found = entities_.find(entity);
+  if (found == entities_.end() || found->second.removeNotified) return;
+  found->second.removeNotified = true;
+  const auto handle = found->second.handleValue;
+  auto runtime = found->second.runtimeClass;
+  if (runtime && runtime->factory && found->second.postConstructed) runtime->factory->Removed(found->second.clientRef);
+  found = entities_.find(entity); // callbacks can rehash or recursively delete
+  if (found == entities_.end() || found->second.handleValue != handle) return;
+  auto& record = found->second;
+#ifndef CBASENPC_CLIENT_TESTS
+  if (record.classHook) SH_REMOVE_HOOK_ID(record.classHook);
+  if (record.releaseHook) SH_REMOVE_HOOK_ID(record.releaseHook);
+#endif
+  record.classHook = record.releaseHook = 0;
+  record.sidecar.reset(); record.sidecarSize = 0; record.runtimeClass = nullptr;
+}
+#ifndef CBASENPC_CLIENT_TESTS
+ClientClass* CClientEntityManager::Hook_GetClientClass()
+{
+  auto entity = META_IFACEPTR(IClientNetworkable)->GetIClientUnknown()->GetBaseEntity();
+  auto found = entities_.find(entity);
+  if (found != entities_.end() && found->second.runtimeClass)
+    RETURN_META_VALUE(MRES_SUPERCEDE, found->second.runtimeClass->Get());
+  RETURN_META_VALUE(MRES_IGNORED, nullptr);
+}
+void CClientEntityManager::Hook_Release()
+{
+  auto entity = META_IFACEPTR(IClientNetworkable)->GetIClientUnknown()->GetBaseEntity();
+  CleanupRuntime(entity);
+  RETURN_META(MRES_IGNORED);
+}
+#endif
+void CClientEntityManager::ReceiveClassname(void* object, const char* classname)
+{
+  auto found = entities_.find(static_cast<C_BaseEntity*>(object));
+  if (found == entities_.end() || found->second.deleting) return;
+  auto& record = found->second;
+  record.replicatedClassname.assign(classname ? classname : "", classname ? strnlen(classname, CBASENPC_NETWORK_CLASSNAME_LENGTH - 1) : 0);
+  record.classname = !record.replicatedClassname.empty() ? record.replicatedClassname :
+    (!record.clientClassname.empty() ? record.clientClassname : "C_BaseEntity");
+}
+void CClientEntityManager::FlushPendingCreates()
+{
+  auto pending = std::move(pendingCreates_); pendingCreates_.clear();
+  for (const auto& item : pending) NotifyCreated(item.entity, item.handleValue);
+}
+void CClientEntityManager::PurgeEntities()
+{
+  if (purging_) return;
+  purging_ = true;
+  pendingCreates_.clear();
+  const auto snapshot = entityOrder_;
+  for (auto entity : snapshot) OnEntityDeleted(entity);
+  entityOrder_.clear(); entities_.clear();
+  purging_ = false;
+}
+
+bool CClientEntityManager::GetRuntimeDiagnostics(int ref, bool& runtime, size_t& sidecarSize,
+ const char*& table, const char*& physical)
+{
+  auto entity = static_cast<C_BaseEntity*>(ResolveClientEntityRef(ref));
+  auto found = entities_.find(entity);
+  if (found == entities_.end()) return false;
+  auto cc = GetClientClass(entity);
+  runtime = found->second.runtimeClass != nullptr;
+  sidecarSize = found->second.sidecarSize;
+  table = cc && cc->m_pRecvTable ? cc->m_pRecvTable->GetName() : "";
+  physical = runtime ? found->second.runtimeClass->physical->m_pNetworkName : (cc ? cc->m_pNetworkName : "");
+  return true;
+}
+#ifndef CBASENPC_CLIENT_TESTS
+void CClientEntityManager::Hook_FrameStageNotify(ClientFrameStage_t stage)
+{ if (stage == FRAME_NET_UPDATE_END) FlushPendingCreates(); RETURN_META(MRES_IGNORED); }
+void CClientEntityManager::Hook_LevelShutdown()
+{ PurgeEntities(); RETURN_META(MRES_IGNORED); }
+#endif

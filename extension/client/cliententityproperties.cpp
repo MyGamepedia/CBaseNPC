@@ -3,6 +3,8 @@
 #include "helpers.h"
 #include "shared/datamaplookup.h"
 #include "sourcesdk/cbasenpcclientlookup.h"
+#include "sourcesdk/cbasenpcrecvtable.h"
+#include "sourcesdk/cbasenpcnetworkschema.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -146,7 +148,18 @@ bool FindRecvProperty(IPluginContext *context, void *entity, int clientRef,
     return false;
 
   if (FindRecvPropInfo(table, name, info))
+  {
+    if (!strcmp(info->prop->GetName(), CBASENPC_CLASSNAME_PROP)) {
+      context->ThrowNativeError("The synthetic classname property has no memory offset; use classname diagnostics");
+      return false;
+    }
+    if (info->sidecar) {
+      const auto field = info->sidecar;
+      *base = g_ClientEntityManager.GetSidecarAddress(entity, 0, field->offset + field->elementCount * field->stride);
+      if (!*base) { context->ThrowNativeError("Client sidecar is unavailable or field exceeds its allocation"); return false; }
+    }
     return true;
+  }
 
   const char *classname = g_ClientEntityManager.GetEntityClassnameClient(clientRef);
   context->ThrowNativeError("RecvProp \"%s\" not found (client entity 0x%08X/%s, netclass %s)",
@@ -185,6 +198,24 @@ bool ResolveRecvElement(IPluginContext *context, const char *name,
   RecvProp *prop = info.prop;
   resolved->offset = info.actualOffset;
   resolved->elementStride = 0;
+
+  if (info.sidecar) {
+    const auto field = info.sidecar;
+    if (element < 0 || size_t(element) >= field->elementCount) {
+      context->ThrowNativeError("Element %d is out of bounds (sidecar %s has %u elements)", element, name, unsigned(field->elementCount)); return false;
+    }
+    if (prop->GetType() == DPT_DataTable) prop = prop->GetDataTable()->GetProp(element);
+    if (prop->GetType() != expectedType && !(expectedType == DPT_Vector && prop->GetType() == DPT_VectorXY)) {
+      context->ThrowNativeError("Sidecar field %s is not %s", name, expectedName); return false;
+    }
+    if (!strcmp(expectedName, "entity handle") && field->kind != CBaseNPCSendFieldKind::EHandle) {
+      context->ThrowNativeError("Sidecar field %s is not an EHANDLE", name); return false;
+    }
+    resolved->prop = prop;
+    resolved->offset = int(field->offset + size_t(element) * field->stride);
+    resolved->elementStride = int(field->stride);
+    return true;
+  }
 
   if (prop->GetType() == expectedType)
   {
@@ -287,6 +318,8 @@ int MatchDataInteger(fieldtype_t type)
 int GetRecvIntegerBits(IPluginContext *context, const ResolvedRecvProp &resolved,
                        int fallbackSize)
 {
+  if (auto field = CBaseNPCRecvTable::FindField(resolved.prop))
+    return field->kind == CBaseNPCSendFieldKind::Bool ? 1 : int(field->elementSize * 8);
   CStandardRecvProxies *proxies = g_ClientEntityManager.GetStandardRecvProxies();
   const RecvVarProxyFn proxy = resolved.prop->GetProxyFn();
   if (proxies)
@@ -576,6 +609,7 @@ cell_t Native_GetEntSendPropOffsClient(IPluginContext *context, const cell_t *pa
   RecvPropInfo info;
   if (!FindRecvPropInfo(clientClass->m_pRecvTable, name, &info))
     return -1;
+  if (info.sidecar || !strcmp(info.prop->GetName(), CBASENPC_CLASSNAME_PROP)) return -1;
 
   if (info.prop->GetType() == DPT_Array && info.prop->GetArrayProp())
   {
@@ -936,6 +970,7 @@ cell_t Native_GetEntPropVectorClient(IPluginContext *context, const cell_t *para
     return 0;
   const int element = params[5];
   uint8_t *address = nullptr;
+  int components = 3;
 
   if (params[2] == kPropData)
   {
@@ -960,6 +995,7 @@ cell_t Native_GetEntPropVectorClient(IPluginContext *context, const cell_t *para
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Vector, "vector", &resolved))
       return 0;
+    if (resolved.prop->GetType() == DPT_VectorXY) components = 2;
     address = base + resolved.offset;
   }
   else
@@ -971,8 +1007,8 @@ cell_t Native_GetEntPropVectorClient(IPluginContext *context, const cell_t *para
   const int error = context->LocalToPhysAddr(params[4], &output);
   if (error != SP_ERROR_NONE)
     return context->ThrowNativeErrorEx(error, "Could not write vector");
-  const Vector &vector = *reinterpret_cast<Vector *>(address);
-  VectorToPawnVector(output, vector);
+  for (int i = 0; i < components; ++i) output[i] = sp_ftoc(reinterpret_cast<float*>(address)[i]);
+  if (components == 2) output[2] = sp_ftoc(0.0f);
   return 1;
 }
 
@@ -986,6 +1022,7 @@ cell_t Native_SetEntPropVectorClient(IPluginContext *context, const cell_t *para
     return 0;
   const int element = params[5];
   uint8_t *address = nullptr;
+  int components = 3;
 
   if (params[2] == kPropData)
   {
@@ -1010,6 +1047,7 @@ cell_t Native_SetEntPropVectorClient(IPluginContext *context, const cell_t *para
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Vector, "vector", &resolved))
       return 0;
+    if (resolved.prop->GetType() == DPT_VectorXY) components = 2;
     address = base + resolved.offset;
   }
   else
@@ -1021,8 +1059,7 @@ cell_t Native_SetEntPropVectorClient(IPluginContext *context, const cell_t *para
   const int error = context->LocalToPhysAddr(params[4], &input);
   if (error != SP_ERROR_NONE)
     return context->ThrowNativeErrorEx(error, "Could not read vector");
-  Vector &vector = *reinterpret_cast<Vector *>(address);
-  PawnVectorToVector(input, vector);
+  for (int i = 0; i < components; ++i) reinterpret_cast<float*>(address)[i] = sp_ctof(input[i]);
   return 1;
 }
 
@@ -1177,6 +1214,8 @@ bool CClientEntityProperties::FindRecvPropInfo(RecvTable *table, const char *nam
   {
     ClientRecvPropInfo info;
     info.prop = CBaseNPCClientLookup::FindProp(table, name, &info.actualOffset);
+    info.sidecar = CBaseNPCRecvTable::FindField(info.prop);
+    if (info.sidecar) info.actualOffset = -1; // Not a physical C_BaseEntity offset.
     found = cache.emplace(name, info).first;
   }
   *result = found->second;

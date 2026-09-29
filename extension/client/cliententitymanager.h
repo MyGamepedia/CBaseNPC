@@ -19,11 +19,13 @@
 #include <toolframework/itoolentity.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 class C_BaseEntity;
+struct CBaseNPCRuntimeClientClass;
 
 // This internal client.dll callback contract is intentionally mirrored here.
 // It is not part of the public IClientEntityList interface.
@@ -44,6 +46,7 @@ class CClientEntityManager final :
 public:
   bool Initialize(SourceMod::IGameConfig *gameConfig, char *error, size_t maxlength);
   void Shutdown();
+  void DetachPluginConsumers();
   bool IsAvailable() const override { return available_; }
 
   IBaseClientDLL *GetBaseClientDLL() const { return clientDll_; }
@@ -73,7 +76,7 @@ public:
   int FindClientEntityByClassname(int startRef, const char *classname) const;
   bool GetEntityClassnameDiagnostics(int clientRef, int *entIndex,
                                      const char **networkName, const char **mapClassname,
-                                     const char **clientClassname, const char **serverClassname,
+                                     const char **clientClassname, const char **replicatedClassname,
                                      const char **classname);
   int EntRefToEntIndexClient(int clientRef) const;
   int EntIndexToEntRefClient(int entIndex) const;
@@ -85,6 +88,18 @@ public:
   string_t AllocPooledStringClient(const char *value) const;
   bool RemoveClientOnlyEntity(void *entity) const;
 
+  bool AttachRuntime(C_BaseEntity* entity, CBaseNPCRuntimeClientClass* runtime);
+  void RunPostConstructor(C_BaseEntity* entity);
+  unsigned char* GetSidecarAddress(void* entity, size_t offset, size_t size);
+  void ReceiveClassname(void* entity, const char* classname);
+  bool GetRuntimeDiagnostics(int ref, bool& runtime, size_t& sidecarSize, const char*& table, const char*& physical);
+  void FlushPendingCreates();
+  void PurgeEntities();
+  ClientClass* Hook_GetClientClass();
+  void Hook_Release();
+  void Hook_FrameStageNotify(ClientFrameStage_t stage);
+  void Hook_LevelShutdown();
+
 private:
 #if defined(CBASENPC_CLIENT_TESTS)
   friend struct CClientEntityManagerTestAccess;
@@ -95,8 +110,13 @@ private:
     uint32_t handleValue;
     bool deleting = false;
     std::string clientClassname;
-    std::string serverClassname;
+    std::string replicatedClassname;
     std::string classname;
+    CBaseNPCRuntimeClientClass* runtimeClass = nullptr;
+    std::unique_ptr<unsigned char[]> sidecar;
+    size_t sidecarSize = 0;
+    int classHook = 0, releaseHook = 0;
+    bool createdNotified = false, postConstructed = false, removeNotified = false;
   };
 
   using EngineListenerVector = CUtlVector<CBaseNPCClient::IClientEntityListener *>;
@@ -108,11 +128,13 @@ private:
   void SeedExistingEntities();
   void TrackEntity(C_BaseEntity *entity, bool notify);
   std::string ReadClientClassname(C_BaseEntity *entity) const;
-  std::string ReadServerClassname(int entIndex) const;
+  void NotifyCreated(C_BaseEntity* entity, uint32_t handleValue);
+  void CleanupRuntime(C_BaseEntity* entity);
   bool IsTrackedEntity(void *entity) const;
 
 private:
   bool available_ = false;
+  bool purging_ = false;
   size_t classCount_ = 0;
   CClientEntityProperties properties_;
   IClientEntityList *clientEntityList_ = nullptr;
@@ -126,6 +148,9 @@ private:
   std::unordered_map<C_BaseEntity *, EntityRecord> entities_;
   std::vector<C_BaseEntity *> entityOrder_;
   std::vector<SourceMod::ICBaseNPCClientEntityListener *> listeners_;
+  struct PendingCreate { C_BaseEntity* entity; uint32_t handleValue; };
+  std::vector<PendingCreate> pendingCreates_;
+  int frameStageHook_ = 0, levelShutdownHook_ = 0;
   int getDataDescMapOffset_ = -1;
   int subRemoveOffset_ = -1;
   string_t (*allocPooledStringClient_)(const char *) = nullptr;

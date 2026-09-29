@@ -258,7 +258,8 @@ bool CBaseNPCSendTable::BuildField(size_t index, const typedescription_t& td,
 	const CBaseNPCSendFieldDesc& desc, std::string& error)
 {
 	if (index + 1 >= static_cast<size_t>(m_Table.GetNumProps())) return Fail(error, "invalid property index");
-	if (!td.fieldName || !td.fieldName[0] || !std::strcmp(td.fieldName, "baseclass"))
+	if (!td.fieldName || !td.fieldName[0] || !std::strcmp(td.fieldName, "baseclass") ||
+		!std::strcmp(td.fieldName, "m_szCBaseNPCServerClassname"))
 		return Fail(error, "empty or reserved field name");
 	if (!td.fieldSize || td.fieldSize > MAX_ARRAY_ELEMENTS || td.fieldSizeInBytes <= 0 || td.fieldSizeInBytes % td.fieldSize)
 		return Fail(error, "invalid field count/size or array exceeds MAX_ARRAY_ELEMENTS");

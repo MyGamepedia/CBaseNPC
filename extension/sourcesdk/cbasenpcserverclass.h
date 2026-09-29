@@ -14,7 +14,10 @@ public:
 	~CBaseNPCServerClassManager();
 	bool Init(SourceMod::IGameConfig* config, char* error, size_t maxlength);
 	void Shutdown();
-	bool Finalize(char* error, size_t maxlength);
+	bool Prepare(bool forceRebuild, char* error, size_t maxlength);
+	bool Publish(char* error, size_t maxlength);
+	bool Commit(char* error, size_t maxlength);
+	bool IsPublished() const;
 	bool IsFinalized() const;
 	bool HasFailed() const;
 	bool IsRegistrationOpen() const;

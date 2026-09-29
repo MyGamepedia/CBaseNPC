@@ -1,4 +1,5 @@
 #include "pluginentityfactory.h"
+#include "sourcesdk/cbasenpcnetworkschema.h"
 #include "entityfactorydictionary.h"
 #include "cbasenpc_internal.h"
 #include "cbasenpc_behavior.h"
@@ -924,7 +925,7 @@ IServerNetworkable* CPluginEntityFactory::Create(const char* classname)
 {
 	if (HasNetworkDefinition())
 	{
-		if (!g_CBaseNPCServerClassManager.IsFinalized() || !GetEffectiveServerClass())
+		if (!g_CBaseNPCNetworkSchemaManager.IsFinalized() || !GetEffectiveServerClass())
 		{
 			g_pSM->LogError(myself, "Cannot create %s: custom network schema is not finalized or failed. Restart required after a schema failure.", classname);
 			return nullptr;

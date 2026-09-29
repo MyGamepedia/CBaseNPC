@@ -273,6 +273,8 @@ void CBaseEntity::InvalidatePhysicsRecursive(int nChangeFlags)
 void CBaseEntity::PostConstructor(const char* name)
 {
 	vPostConstructor(this, name);
+	// Classname is a synthetic SendProp without a physical field offset.
+	NetworkStateChanged();
 }
 
 void CBaseEntity::UpdateOnRemove(void)

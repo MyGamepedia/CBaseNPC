@@ -126,6 +126,10 @@ struct CBaseNPCServerClassManager::State
 	FCall<void> term;
 	std::vector<ServerClass*> stock;
 	std::vector<std::unique_ptr<FinalClass>> classes;
+	std::vector<ServerClass*> combined;
+	std::vector<SendTable*> roots;
+	std::map<CPluginEntityFactory*, FinalClass*> built;
+	bool prepared = false;
 	ServerClass* head = nullptr;
 	int hook = 0;
 	bool available = false;
@@ -183,14 +187,14 @@ bool CBaseNPCServerClassManager::Init(SourceMod::IGameConfig* config, char* erro
 void CBaseNPCServerClassManager::Shutdown()
 {
 	if (!m_State) return;
-	if (m_State->hook) SH_REMOVE_HOOK_ID(m_State->hook);
-	m_State->hook = 0;
 	if (m_State->published)
 	{
 		m_State->stopped = true;
 		g_pSM->LogError(myself, "CBaseNPC runtime unload after network publication is unsupported. Metadata/code retained; restart the process before continuing.");
 		return;
 	}
+	if (m_State->hook) SH_REMOVE_HOOK_ID(m_State->hook);
+	m_State->hook = 0;
 	m_State.reset();
 }
 
@@ -205,7 +209,8 @@ const char* CBaseNPCServerClassManager::RegistrationError() const
 }
 bool CBaseNPCServerClassManager::IsFinalized() const { return m_State && m_State->finalized && !m_State->failed && !m_State->stopped; }
 bool CBaseNPCServerClassManager::HasFailed() const { return m_State && m_State->failed; }
-ServerClass* CBaseNPCServerClassManager::GetCombinedHead() const { return m_State ? m_State->head : nullptr; }
+bool CBaseNPCServerClassManager::IsPublished() const { return m_State && m_State->published; }
+ServerClass* CBaseNPCServerClassManager::GetCombinedHead() const { return m_State && !m_State->combined.empty() ? m_State->combined.front() : nullptr; }
 ServerClass* CBaseNPCServerClassManager::Hook_GetAllServerClasses()
 {
 	if (m_State && m_State->published) RETURN_META_VALUE(MRES_SUPERCEDE, m_State->head);
@@ -219,7 +224,7 @@ ServerClass* CBaseNPCServerClassManager::FindStockOrCustomClass(const char* name
 	return nullptr;
 }
 
-bool CBaseNPCServerClassManager::Finalize(char* error, size_t maxlength)
+bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t maxlength)
 {
 	if (!m_State) return SetError(error, maxlength, "network manager is not initialized");
 	auto& state = *m_State;
@@ -249,9 +254,9 @@ bool CBaseNPCServerClassManager::Finalize(char* error, size_t maxlength)
 				throw std::runtime_error(factory->m_iClassname + ": duplicate SendTable name " + factory->m_SendTableName);
 			declarations.emplace(factory->m_NetworkName, factory);
 		}
-		if (declarations.empty())
+		if (declarations.empty() && !forceRebuild)
 		{
-			state.finalized = true; // No Term/Init, no relinking, no published hook.
+			state.prepared = true; // Dedicated stock-only: no mutation needed.
 			return true;
 		}
 		if (!state.available || !g_CBaseNPCSendProxy.IsInitialized()) throw std::runtime_error("networking dependencies are unavailable");
@@ -259,7 +264,7 @@ bool CBaseNPCServerClassManager::Finalize(char* error, size_t maxlength)
 		if (state.stock.size() + declarations.size() > MAX_SERVER_CLASSES) throw std::runtime_error("too many ServerClasses (MAX_SERVER_CLASSES)");
 
 		std::map<CPluginEntityFactory*, int> visit;
-		std::map<CPluginEntityFactory*, FinalClass*> built;
+		auto& built = state.built;
 		std::function<FinalClass*(CPluginEntityFactory*)> build = [&](CPluginEntityFactory* factory) -> FinalClass*
 		{
 			if (visit[factory] == 2) return built[factory];
@@ -326,15 +331,57 @@ bool CBaseNPCServerClassManager::Finalize(char* error, size_t maxlength)
 		for (auto& sc : state.classes) CollectTableNames(sc->table->GetTable(), stockTables, tableNames);
 		if (stockTables.size() > MAX_DATATABLES) throw std::runtime_error("too many SendTables (MAX_DATATABLES)");
 
-		std::vector<ServerClass*> combined = state.stock;
+		auto& combined = state.combined;
+		combined = state.stock;
 		for (auto& sc : state.classes) combined.push_back(sc->Get());
 		std::sort(combined.begin(), combined.end(), [](ServerClass* a, ServerClass* b) { return Q_stricmp(a->m_pNetworkName, b->m_pNetworkName) < 0; });
-		std::vector<SendTable*> roots;
-		for (auto sc : combined) roots.push_back(sc->m_pTable); // Intentionally NOT deduplicated.
+		auto& roots = state.roots;
+		for (auto sc : combined) {
+			std::set<SendTable*> path;
+			// Reserve the synthetic DT_BaseEntity classname leaf before any
+			// mutation. Conservatively reserve it for non-entity tables too.
+			if (CountProps(sc->m_pTable, path) >= MAX_DATATABLE_PROPS)
+				throw std::runtime_error(std::string(sc->m_pNetworkName) + ": no flattened property capacity for classname bridge");
+			roots.push_back(sc->m_pTable); // Intentionally NOT deduplicated.
+		}
+		state.prepared = true;
+		return true;
+	}
+	catch (const std::exception& ex)
+	{
+		state.failed = true;
+		state.failure = ex.what();
+		state.built.clear(); state.classes.clear(); state.roots.clear(); state.combined.clear();
+		return SetError(error, maxlength, state.failure);
+	}
+}
+
+bool CBaseNPCServerClassManager::Publish(char* error, size_t maxlength)
+{
+	if (!m_State || !m_State->prepared || m_State->failed) return SetError(error, maxlength, "server schema was not prepared");
+	auto& state = *m_State;
+	if (state.combined.empty() || state.published) return true;
+	try {
 		if (!RetainCodeModule()) throw std::runtime_error("cannot retain network proxy module for process lifetime");
+		auto& combined = state.combined;
 		for (size_t i = 0; i < combined.size(); ++i) combined[i]->m_pNext = i + 1 < combined.size() ? combined[i + 1] : nullptr;
 		state.head = combined.front();
 		state.published = true;
+		return true;
+	} catch (const std::exception& ex) { return SetError(error, maxlength, ex.what()); }
+}
+
+bool CBaseNPCServerClassManager::Commit(char* error, size_t maxlength)
+{
+	if (!m_State || !m_State->prepared || m_State->failed) return SetError(error, maxlength, "server schema was not prepared");
+	auto& state = *m_State;
+	if (state.finalized) return true;
+	if (state.combined.empty()) { state.finalized = true; return true; }
+	if (!state.published) return SetError(error, maxlength, "server schema was not published");
+	try {
+		auto& roots = state.roots;
+		auto& built = state.built;
+		auto& combined = state.combined;
 		state.term();
 		if (!state.init(roots.data(), static_cast<int>(roots.size())))
 			throw std::runtime_error("SendTable_Init failed AFTER SendTable_Term. Engine networking is unsafe; PROCESS RESTART REQUIRED");
@@ -366,6 +413,7 @@ bool CBaseNPCServerClassManager::Finalize(char* error, size_t maxlength)
 		if (actual) throw std::runtime_error("public ServerClass registry has unexpected entries; restart required");
 		state.finalized = true;
 		g_pSM->LogMessage(myself, "Finalized %u custom ServerClasses with %u custom SendProps; %u stock classes, %u ordered root SendTables.", unsigned(built.size()), unsigned(fields), unsigned(state.stock.size()), unsigned(roots.size()));
+		state.built.clear(); // Never retain plugin-owned factory pointers after publication.
 		return true;
 	}
 	catch (const std::exception& ex)

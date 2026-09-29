@@ -20,7 +20,8 @@
  * Prop_Data searches client datamaps; Prop_Send searches client RecvTables.
  * Writes affect local client memory only and may be overwritten by networking.
  * Get/SetPropEntity and Get/SetDataEntity use client refs; -1 clears a handle.
- * Strings of type string_t are allocated in the CLIENT string pool.
+ * Stock datamap string_t values use the CLIENT string pool. Dynamic network
+ * strings use bounded sidecar char buffers, never client string_t values.
  */
 methodmap CClientEntity
 {
@@ -29,6 +30,8 @@ methodmap CClientEntity
   public native int GetHandleRef();
 
   public native Address GetAddress();
+  public native bool GetRuntimeDiagnostics(bool &runtimeClass, int &sidecarSize,
+    char[] recvTable, int recvTableLength, char[] physicalBase, int physicalBaseLength);
   public native bool IsValid();
   public native int GetEntIndex(bool warn = true);
   public native bool GetClassname(char[] buffer, int maxlength);
@@ -37,7 +40,7 @@ methodmap CClientEntity
     char[] networkName, int networkNameLength,
     char[] mapClassname, int mapClassnameLength,
     char[] clientClassname, int clientClassnameLength,
-    char[] serverClassname, int serverClassnameLength,
+    char[] replicatedServerClassname, int replicatedServerClassnameLength,
     char[] effectiveClassname, int effectiveClassnameLength);
   public native int GetData(int offset, int size = 4);
   public native void SetData(int offset, any value, int size = 4);
@@ -64,7 +67,9 @@ methodmap CClientEntity
   public native int GetPropArraySize(PropType type, const char[] prop);
   public native bool HasProp(PropType type, const char[] prop);
   // actual=false: local property offset; true: accumulated table offset.
-  // Returns -1 if absent. Does not execute DataTable pointer-redirection proxies.
+  // Returns -1 if absent OR sidecar/synthetic (no physical object offset).
+  // Named Prop_Send access and HasProp still work for sidecar properties.
+  // Does not execute DataTable pointer-redirection proxies.
   public native int GetRecvPropOffset(const char[] prop, bool actual = false);
   public native void StoreHandle(Address address);
   public native bool GetNetworkClass(char[] clsname, int maxlength);
@@ -77,8 +82,9 @@ methodmap CClientEntity
  * FromEntIndex returns a serial-validated proper reference. Enumeration,
  * FromAddress, FromHandleAddress and FindByClassname return BCompat refs.
  * FindByClassname starts after startRef (-1 begins), supports a trailing '*'
- * and is case-insensitive. Classnames currently prefer the matching server
- * classname, then the client's IClientTools name, then C_BaseEntity.
+ * and is case-insensitive. Classnames prefer the replicated server classname,
+ * then the client's IClientTools name, then C_BaseEntity. There is no direct
+ * server-entity lookup, including on listen servers.
  */
 methodmap CClientEntityManager
 {
@@ -93,6 +99,8 @@ methodmap CClientEntityManager
 
 // Pre-existing entities are seeded silently. During destruction the record
 // remains available until callbacks return. Do not retain callback addresses.
+// Networked creation is delivered at FRAME_NET_UPDATE_END, after initial
+// decode; deleted-before-flush entities are not delivered. Client-only is immediate.
 forward void OnEntityCreatedClient(int clientEntRef,
                                    const char[] classname, Address clientAddress);
 forward void OnEntityDestroyedClient(int clientEntRef);

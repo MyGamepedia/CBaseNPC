@@ -5,9 +5,11 @@
 #include "helpers.h"
 #include "sourcesdk/cbasenpcsendproxy.h"
 #include "sourcesdk/cbasenpcserverclass.h"
+#include "sourcesdk/cbasenpcnetworkschema.h"
 #if SOURCE_ENGINE == SE_BMS
 #include "client/cliententitymanager.h"
 #include "sourcesdk/cbasenpcrecvproxy.h"
+#include "sourcesdk/cbasenpcclientclass.h"
 #endif
 #include "sourcesdk/nav_mesh.h"
 #if SOURCE_ENGINE == SE_TF2  
@@ -99,6 +101,10 @@ enum CBaseNPCDataMapIndex : size_t
 }
 
 bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
+	if (g_CBaseNPCNetworkSchemaManager.IsPublished()) {
+		snprintf(error, maxlength, "CBaseNPC schema is already published in this process; PROCESS RESTART REQUIRED");
+		return false;
+	}
 	char conf_error[255];
 	if (!gameconfs->LoadGameConfigFile("cbasenpc", &g_pGameConf, conf_error, sizeof(conf_error))) {
 		snprintf(error, maxlength, "FAILED TO LOAD GAMEDATA ERROR: %s", conf_error);
@@ -136,6 +142,8 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 #if SOURCE_ENGINE == SE_BMS
 		if (!loadSucceeded)
 		{
+			g_PluginClientEntityFactories.Shutdown();
+			g_CBaseNPCClientClassManager.Shutdown();
 			g_CBaseNPCRecvProxy.Shutdown();
 			g_ClientEntityManager.Shutdown();
 		}
@@ -148,6 +156,14 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 		g_CBaseNPCSendProxy.Shutdown();
 		return false;
 	}
+#if SOURCE_ENGINE == SE_BMS
+	if (!g_CBaseNPCClientClassManager.Init(g_pGameConf, error, maxlength) ||
+		!g_PluginClientEntityFactories.Init(error, maxlength)) {
+		g_CBaseNPCServerClassManager.Shutdown();
+		g_CBaseNPCSendProxy.Shutdown();
+		return false;
+	}
+#endif
 
 	if (bEdictSlotsAreNotAvailable) //we loaded early - can't create edicts to get datamaps from their methods, try to scan memory for datamaps instead
 	{
@@ -269,6 +285,9 @@ void CBaseNPCExt::OnCoreMapStart(edict_t* edictlist, int edictCount, int clientM
 }
 
 void CBaseNPCExt::OnCoreMapEnd() {
+#if SOURCE_ENGINE == SE_BMS
+	g_ClientEntityManager.PurgeEntities();
+#endif
 	g_pBaseNPCPluginActionFactories->OnCoreMapEnd();
 	g_pPluginEntityFactories->OnCoreMapEnd();
 	CNavMesh::OnCoreMapEnd();
@@ -332,8 +351,12 @@ void CBaseNPCExt::SDK_OnAllLoaded() {
 void CBaseNPCExt::SDK_OnAllPluginsLoaded()
 {
 	char error[512];
-	if (!g_CBaseNPCServerClassManager.Finalize(error, sizeof(error)))
+	if (!g_CBaseNPCNetworkSchemaManager.Finalize(error, sizeof(error)))
+	{
 		g_pSM->LogError(myself, "Failed to finalize CBaseNPC network classes: %s", error);
+		if (g_CBaseNPCNetworkSchemaManager.IsPublished())
+			Error("CBaseNPC network initialization failed after publication: %s", error);
+	}
 }
 
 bool CBaseNPCExt::QueryRunning(char* error, size_t maxlength) {
@@ -369,7 +392,21 @@ void CBaseNPCExt::NotifyInterfaceDrop(SMInterface* interface) {
 
 void CBaseNPCExt::SDK_OnUnload()
 {
+	if (g_CBaseNPCNetworkSchemaManager.IsPublished()) {
+		// IExtensionInterface has no unload veto. Do not invalidate the engine's
+		// schema/proxy/thunk pointers or revert its public lists during teardown.
+		// A retained OS module alone is insufficient: keep managers/hooks too.
+		g_pSM->LogError(myself, "CBaseNPC runtime unload after network publication is unsupported. Schema, code and engine hooks retained; PROCESS RESTART REQUIRED. Do not continue playing or reload the extension.");
+		g_CBaseNPCNetworkSchemaManager.StopAfterUnload();
 #if SOURCE_ENGINE == SE_BMS
+		g_PluginClientEntityFactories.Shutdown();
+		g_ClientEntityManager.DetachPluginConsumers();
+#endif
+		return;
+	}
+#if SOURCE_ENGINE == SE_BMS
+	g_PluginClientEntityFactories.Shutdown();
+	g_CBaseNPCClientClassManager.Shutdown();
 	g_CBaseNPCRecvProxy.Shutdown();
 	g_ClientEntityManager.Shutdown();
 #endif

@@ -123,6 +123,7 @@ public:
 private:
 	friend class CustomFactory;
 	friend class CBaseNPCServerClassManager;
+	friend class CBaseNPCClientClassManager;
 	void InstallGameFactory(const char* classname, IEntityFactory* factory);
 	void RemoveGameFactory(IEntityFactory* factory);
 
@@ -162,6 +163,7 @@ public:
 	bool IsDefiningDataDesc() const { return m_bDefiningDataDesc; }
 	void EndDataDesc() override;
 	friend class CBaseNPCServerClassManager;
+	friend class CBaseNPCClientClassManager;
 
 public:
 	std::string m_iClassname;

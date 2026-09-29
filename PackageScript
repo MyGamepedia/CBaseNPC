@@ -57,6 +57,8 @@ CopyDirContent('gamedata', 'addons/sourcemod/gamedata')
 #shutil.make_archive(builder.buildFolder, 'gztar', builder.buildFolder)
 # Ship test sources alongside disabled test binaries; no second extension.
 CopyFiles('scripting', 'addons/sourcemod/scripting', [
+  'cbasenpc_knife_network_test.sp',
+  'cbasenpc_otis_sendprops_test.sp',
   'cbasenpc_client_entities_test.sp',
   'cbasenpc_client_properties_test.sp',
 ])
