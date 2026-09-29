@@ -1,4 +1,5 @@
 #include "cbasenpcserverclass.h"
+#include "cbasenpcnetworkschema.h"
 #include "cbasenpcsendtable.h"
 #include "cbasenpcsendproxy.h"
 #include "extension.h"
@@ -192,7 +193,7 @@ void CBaseNPCServerClassManager::Shutdown()
 	if (m_State->published)
 	{
 		m_State->stopped = true;
-		g_pSM->LogError(myself, "CBaseNPC runtime unload after network publication is unsupported. Metadata/code retained; restart the process before continuing.");
+		g_pSM->LogError(myself, "CBaseNPC unload after network publication is unsupported; retained metadata/code do not make hooks safe. Restart the process immediately.");
 		return;
 	}
 	if (m_State->hook) SH_REMOVE_HOOK_ID(m_State->hook);
@@ -352,10 +353,12 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 		if (stockTables.size() > MAX_DATATABLES) throw std::runtime_error("too many SendTables (MAX_DATATABLES)");
 
 		auto& combined = state.combined;
+		combined.reserve(state.stock.size() + state.classes.size());
 		combined = state.stock;
 		for (auto& sc : state.classes) combined.push_back(sc->Get());
 		std::sort(combined.begin(), combined.end(), [](ServerClass* a, ServerClass* b) { return Q_stricmp(a->m_pNetworkName, b->m_pNetworkName) < 0; });
 		auto& roots = state.roots;
+		roots.reserve(combined.size());
 		for (auto sc : combined) {
 			std::set<SendTable*> path;
 			// Reserve the synthetic DT_BaseEntity classname leaf before any
@@ -413,14 +416,16 @@ bool CBaseNPCServerClassManager::Commit(char* error, size_t maxlength)
 			fields += factory->m_SendFields.size();
 			// Freeze allocation ancestors too, including datamap-only bases.
 			for (auto cur = factory; cur; cur = CPluginEntityFactory::ToPluginEntityFactory(cur->FindBaseFactory())) cur->m_bNetworkLayoutFrozen = true;
-			g_pSM->LogMessage(myself, "Network class %s: %s / %s, base %s (%u fields)", factory->m_iClassname.c_str(), factory->m_NetworkName.c_str(), factory->m_SendTableName.c_str(), factory->m_BaseNetworkName.c_str(), unsigned(factory->m_SendFields.size()));
-			auto table = item.second->table->GetTable();
-			for (int i = 1; i < table->GetNumProps(); ++i)
-			{
-				auto prop = table->GetProp(i);
-				g_pSM->LogMessage(myself, "  SendProp %s: offset 0x%x, type %d, bits %d, flags 0x%x, array elements %d",
-					prop->GetName(), prop->GetOffset(), int(prop->GetType()), prop->m_nBits, prop->GetFlags(),
-					prop->GetArrayProp() ? prop->GetDataTable()->GetNumProps() : 0);
+			if (CBaseNPCNetworkDebugEnabled()) {
+				g_pSM->LogMessage(myself, "Network class %s: %s / %s, base %s (%u fields)", factory->m_iClassname.c_str(), factory->m_NetworkName.c_str(), factory->m_SendTableName.c_str(), factory->m_BaseNetworkName.c_str(), unsigned(factory->m_SendFields.size()));
+				auto table = item.second->table->GetTable();
+				for (int i = 1; i < table->GetNumProps(); ++i)
+				{
+					auto prop = table->GetProp(i);
+					g_pSM->LogMessage(myself, "  SendProp %s: offset 0x%x, type %d, bits %d, flags 0x%x, array elements %d",
+						prop->GetName(), prop->GetOffset(), int(prop->GetType()), prop->m_nBits, prop->GetFlags(),
+						prop->GetArrayProp() ? prop->GetDataTable()->GetNumProps() : 0);
+				}
 			}
 		}
 		// Check the public interface, not merely the vector used to relink it.

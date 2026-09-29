@@ -18,6 +18,17 @@
 #endif
 
 CBaseNPCNetworkSchemaManager g_CBaseNPCNetworkSchemaManager;
+bool g_CBaseNPCNetworkDebugEnabled = false;
+namespace {
+void NetworkDebugChanged(IConVar*, const char*, float);
+}
+ConVar cbasenpc_network_debug("cbasenpc_network_debug", "0", FCVAR_NONE,
+ "Log detailed dynamic schema diagnostics and collect runtime network counters.",
+ NetworkDebugChanged);
+namespace {
+void NetworkDebugChanged(IConVar*, const char*, float)
+{ g_CBaseNPCNetworkDebugEnabled = cbasenpc_network_debug.GetBool(); }
+}
 static_assert(CBASENPC_NETWORK_CLASSNAME_LENGTH == DT_MAX_STRING_BUFFERSIZE,
  "Classname bridge must match the engine string encoding limit");
 namespace {
@@ -102,7 +113,7 @@ bool CBaseNPCNetworkSchemaManager::Finalize(char* error, size_t maxlength)
      if (!bridge->send) throw std::runtime_error("DT_BaseEntity SendTable was not found");
      auto send = bridge->send;
      bridge->oldSend = send->m_pProps; bridge->oldSendCount = send->m_nProps;
-     if (send->m_nProps + 1 >= MAX_DATATABLE_PROPS) throw std::runtime_error("DT_BaseEntity has no capacity for classname bridge");
+     if (send->m_nProps >= MAX_DATATABLE_PROPS) throw std::runtime_error("DT_BaseEntity has no capacity for classname bridge");
      bridge->sendProps.reset(new SendProp[send->m_nProps + 1]);
      for (int i = 0; i < send->m_nProps; ++i) {
        if (!strcmp(send->GetProp(i)->GetName(), CBASENPC_CLASSNAME_PROP)) throw std::runtime_error("classname bridge SendProp already exists; restart required");
@@ -119,7 +130,7 @@ bool CBaseNPCNetworkSchemaManager::Finalize(char* error, size_t maxlength)
        if (!bridge->recv) throw std::runtime_error("DT_BaseEntity RecvTable was not found");
        auto recv = bridge->recv;
        bridge->oldRecv = recv->m_pProps; bridge->oldRecvCount = recv->m_nProps;
-       if (recv->m_nProps + 1 >= MAX_DATATABLE_PROPS) throw std::runtime_error("DT_BaseEntity RecvTable has no capacity for classname bridge");
+       if (recv->m_nProps >= MAX_DATATABLE_PROPS) throw std::runtime_error("DT_BaseEntity RecvTable has no capacity for classname bridge");
        bridge->recvProps.reset(new RecvProp[recv->m_nProps + 1]);
        for (int i = 0; i < recv->m_nProps; ++i) {
          if (!strcmp(recv->GetProp(i)->GetName(), CBASENPC_CLASSNAME_PROP)) throw std::runtime_error("classname bridge RecvProp already exists; restart required");
@@ -140,6 +151,7 @@ bool CBaseNPCNetworkSchemaManager::Finalize(char* error, size_t maxlength)
 #if SOURCE_ENGINE == SE_BMS
      if (bridge->recv) { bridge->recv->m_pProps = bridge->recvProps.get(); bridge->recv->m_nProps = bridge->oldRecvCount + 1; }
 #endif
+     classnameBridgeEnabled_ = true;
      bridge.release(); // Both original and replacement arrays are process-lifetime.
    }
 #if SOURCE_ENGINE == SE_BMS

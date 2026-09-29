@@ -3,6 +3,7 @@
 
 #include "cbasenpcsendtable.h"
 #include <dt_recv.h>
+#include <deque>
 #include <unordered_map>
 
 // Offsets in this descriptor are NEVER offsets in a C_BaseEntity.
@@ -14,6 +15,11 @@ struct CBaseNPCRecvField
  bool isUnsigned;
 };
 
+struct CBaseNPCEHandleInitRange
+{
+ size_t offset, count, stride;
+};
+
 class CBaseNPCRecvTable
 {
 public:
@@ -22,6 +28,7 @@ public:
  bool BuildField(size_t index, const typedescription_t& td, const CBaseNPCSendFieldDesc& desc, std::string& error);
  RecvTable* GetTable() { return &m_Table; }
  size_t GetSidecarSize() const { return m_Size; }
+ const std::vector<CBaseNPCEHandleInitRange>& GetEHandleInitRanges() const { return m_EHandleInitRanges; }
  const char* CopyString(const char* text);
  static const CBaseNPCRecvField* FindField(const RecvProp* prop);
  // Includes array containers. Used to reject raw object-offset queries.
@@ -35,6 +42,8 @@ private:
  std::vector<std::unique_ptr<RecvProp[]>> m_ArrayProps;
  std::vector<std::unique_ptr<RecvTable>> m_ArrayTables;
  std::vector<const RecvProp*> m_Registered;
+ std::deque<CBaseNPCRecvField> m_Fields;
+ std::vector<CBaseNPCEHandleInitRange> m_EHandleInitRanges;
  RecvTable m_Table;
  size_t m_Size;
 };

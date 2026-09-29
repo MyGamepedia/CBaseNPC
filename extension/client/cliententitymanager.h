@@ -19,6 +19,7 @@
 #include <toolframework/itoolentity.h>
 
 #include <cstdint>
+#include <array>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -26,6 +27,21 @@
 
 class C_BaseEntity;
 struct CBaseNPCRuntimeClientClass;
+
+struct CBaseNPCClientEntityAccess
+{
+  C_BaseEntity *entity = nullptr;
+  IClientNetworkable *networkable = nullptr;
+  ClientClass *clientClass = nullptr;
+  datamap_t *dataMap = nullptr;
+  unsigned char *recvBase = nullptr;
+  unsigned char *sidecar = nullptr;
+  size_t sidecarSize = 0;
+  CBaseNPCRuntimeClientClass *runtimeClass = nullptr;
+  const char *classname = nullptr;
+  uint32_t handleValue = 0;
+  int clientRef = -1;
+};
 
 // This internal client.dll callback contract is intentionally mirrored here.
 // It is not part of the public IClientEntityList interface.
@@ -62,6 +78,7 @@ public:
   void OnEntityDeleted(C_BaseEntity *entity) override;
 
   void *ResolveClientEntityRef(int clientRef) override;
+  bool ResolveAccess(int clientRef, CBaseNPCClientEntityAccess& access);
   int EntityToClientRef(void *entity) override;
   int EntityToClientHandleRef(void *entity) override;
   bool IsSameClientEntity(void *entity, int clientHandleRef) override;
@@ -91,6 +108,10 @@ public:
   bool AttachRuntime(C_BaseEntity* entity, CBaseNPCRuntimeClientClass* runtime);
   void RunPostConstructor(C_BaseEntity* entity);
   unsigned char* GetSidecarAddress(void* entity, size_t offset, size_t size);
+  unsigned char* GetNetworkSidecarAddress(int objectId, void* entity, size_t offset, size_t size);
+  void RecordSlowRecvMetadataLookup();
+  void RecordSidecarPoolUse(bool reused);
+  void DumpNetworkStats() const;
   void ReceiveClassname(void* entity, const char* classname);
   bool GetRuntimeDiagnostics(int ref, bool& runtime, size_t& sidecarSize, const char*& table, const char*& physical);
   void FlushPendingCreates();
@@ -111,10 +132,10 @@ private:
     bool deleting = false;
     std::string clientClassname;
     std::string replicatedClassname;
-    std::string classname;
     CBaseNPCRuntimeClientClass* runtimeClass = nullptr;
-    std::unique_ptr<unsigned char[]> sidecar;
+    unsigned char* sidecar = nullptr;
     size_t sidecarSize = 0;
+    int networkSlot = -1;
     int classHook = 0, releaseHook = 0;
     bool createdNotified = false, postConstructed = false, removeNotified = false;
   };
@@ -131,6 +152,10 @@ private:
   void NotifyCreated(C_BaseEntity* entity, uint32_t handleValue);
   void CleanupRuntime(C_BaseEntity* entity);
   bool IsTrackedEntity(void *entity) const;
+  EntityRecord* ResolveRecord(int clientRef, C_BaseEntity** entity = nullptr);
+  datamap_t* GetDataMapUnchecked(void* entity) const;
+  const std::string& EffectiveClassname(const EntityRecord& record) const;
+  void ClearNetworkSlot(EntityRecord& record, C_BaseEntity* entity);
 
 private:
   bool available_ = false;
@@ -146,6 +171,13 @@ private:
   IForward *onEntityCreated_ = nullptr;
   IForward *onEntityDestroyed_ = nullptr;
   std::unordered_map<C_BaseEntity *, EntityRecord> entities_;
+  struct NetworkSidecarSlot {
+    C_BaseEntity* entity = nullptr;
+    unsigned char* sidecar = nullptr;
+    size_t sidecarSize = 0;
+    uint32_t handleValue = 0;
+  };
+  std::array<NetworkSidecarSlot, MAX_EDICTS> networkSidecars_{};
   std::vector<C_BaseEntity *> entityOrder_;
   std::vector<SourceMod::ICBaseNPCClientEntityListener *> listeners_;
   struct PendingCreate { C_BaseEntity* entity; uint32_t handleValue; };
@@ -154,6 +186,10 @@ private:
   int getDataDescMapOffset_ = -1;
   int subRemoveOffset_ = -1;
   string_t (*allocPooledStringClient_)(const char *) = nullptr;
+  uint64_t recvProxyCalls_ = 0, objectIdSlotMisses_ = 0;
+  uint64_t slowRecvMetadataLookups_ = 0, sidecarPointerLookups_ = 0;
+  uint64_t sidecarPoolAllocations_ = 0, sidecarPoolReuses_ = 0;
+  uint64_t clientToolsClassnameFallbacks_ = 0;
 };
 
 extern CClientEntityManager g_ClientEntityManager;

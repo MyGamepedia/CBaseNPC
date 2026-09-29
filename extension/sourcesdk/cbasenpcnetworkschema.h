@@ -13,10 +13,14 @@ public:
  bool Finalize(char* error, size_t maxlength);
  bool IsFinalized() const { return finalized_ && !failed_; }
  bool IsPublished() const { return published_; }
+ bool IsClassnameBridgeEnabled() const { return classnameBridgeEnabled_; }
  void StopAfterUnload() { failed_ = true; }
 private:
  bool attempted_ = false, finalized_ = false, failed_ = false, published_ = false;
  bool lateLoad_ = false;
+ bool classnameBridgeEnabled_ = false;
 };
 extern CBaseNPCNetworkSchemaManager g_CBaseNPCNetworkSchemaManager;
+extern bool g_CBaseNPCNetworkDebugEnabled;
+inline bool CBaseNPCNetworkDebugEnabled() { return g_CBaseNPCNetworkDebugEnabled; }
 #endif

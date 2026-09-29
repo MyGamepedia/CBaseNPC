@@ -122,20 +122,14 @@ PluginFactoryEntityRecord_t* CPluginEntityFactories::FindRecord(CBaseEntity* pEn
 		return nullptr;
 	}
 	
-	cell_t key = (cell_t)pEntity;
-	if (m_Records.find(key) == m_Records.end())
+	auto found = m_Records.find(pEntity);
+	if (found == m_Records.end())
 	{
-		if (create)
-		{
-			m_Records.emplace(key, std::make_unique<PluginFactoryEntityRecord_t>(pEntity));
-		}
-		else
-		{
-			return nullptr;
-		}
+		if (!create) return nullptr;
+		found = m_Records.emplace(pEntity, std::make_unique<PluginFactoryEntityRecord_t>(pEntity)).first;
 	}
 
-	return m_Records[key].get();
+	return found->second.get();
 }
 
 void CPluginEntityFactories::RemoveRecord(CBaseEntity* pEntity)
@@ -145,8 +139,7 @@ void CPluginEntityFactories::RemoveRecord(CBaseEntity* pEntity)
 		return;
 	}
 
-	cell_t key = (cell_t)pEntity;
-	m_Records.erase(key);
+	m_Records.erase(pEntity);
 }
 
 CPluginEntityFactory* CPluginEntityFactories::GetFactory(CBaseEntity* pEntity)

@@ -3,6 +3,7 @@
 
 #include <datamap.h>
 #include <dt_recv.h>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 struct CBaseNPCRecvField;
@@ -26,8 +27,12 @@ public:
   void ClearCaches();
   bool FindDataMapInfo(datamap_t *map, const char *name, ClientDataMapInfo *result);
   bool FindRecvPropInfo(RecvTable *table, const char *name, ClientRecvPropInfo *result);
+  uint64_t CacheHits() const { return cacheHits_; }
+  uint64_t CacheMisses() const { return cacheMisses_; }
 private:
   std::unordered_map<datamap_t *, std::unordered_map<std::string, ClientDataMapInfo>> dataMaps_;
   std::unordered_map<RecvTable *, std::unordered_map<std::string, ClientRecvPropInfo>> recvTables_;
+  uint64_t cacheHits_ = 0;
+  uint64_t cacheMisses_ = 0;
 };
 #endif

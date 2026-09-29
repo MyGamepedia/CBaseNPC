@@ -1,4 +1,5 @@
 #include "cbasenpcclientclass.h"
+#include "cbasenpcnetworkschema.h"
 #include "cbasenpcserverclass.h"
 #include "cbasenpcrecvproxy.h"
 #include "extension.h"
@@ -214,6 +215,7 @@ bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxleng
      std::unique_ptr<CBaseNPCRuntimeClientClass> result(new CBaseNPCRuntimeClientClass);
      result->physical = physical; result->factory = f;
      result->table.reset(new CBaseNPCRecvTable(f->tableName.c_str(), serverFactory->m_SendFields.size(), base->m_pRecvTable, inheritedSize));
+     if (custom != declarations.end()) result->ehandleInitRanges = built[custom->second]->ehandleInitRanges;
      for (size_t i = 0; i < serverFactory->m_SendFields.size(); ++i) {
        const auto& desc = serverFactory->m_SendFields[i];
        auto td = serverFactory->GetFieldDescriptor(desc.dataDescIndex);
@@ -222,6 +224,8 @@ bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxleng
        std::string detail;
        if (!td || !result->table->BuildField(i, *td, desc, detail)) throw std::runtime_error(f->networkName + ": " + detail);
      }
+     const auto& localRanges = result->table->GetEHandleInitRanges();
+     result->ehandleInitRanges.insert(result->ehandleInitRanges.end(), localRanges.begin(), localRanges.end());
      auto table = result->table.get();
      result->storage = {createThunks[s.classes.size()], nullptr, table->CopyString(f->networkName.c_str()), table->GetTable(), nullptr, -1, table->CopyString(f->classname.c_str())};
      auto server = g_CBaseNPCServerClassManager.FindStockOrCustomClass(f->networkName.c_str());
@@ -233,10 +237,12 @@ bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxleng
    for (auto& declaration : declarations) build(declaration.second);
    // Stable custom order, followed by the untouched stock linked list.
    std::vector<ClientClass*> customList;
+   customList.reserve(s.classes.size());
    for (auto& cc : s.classes) customList.push_back(cc->Get());
    std::sort(customList.begin(), customList.end(), [](ClientClass* a, ClientClass* b) { return Q_stricmp(a->m_pNetworkName, b->m_pNetworkName) < 0; });
    for (size_t i = 0; i < customList.size(); ++i) customList[i]->m_pNext = i + 1 < customList.size() ? customList[i + 1] : s.stock.front();
    s.head = customList.empty() ? s.stock.front() : customList.front();
+   s.roots.reserve(s.stock.size() + s.classes.size());
    for (auto cc = s.head; cc; cc = cc->m_pNext) s.roots.push_back(cc->m_pRecvTable);
    s.prepared = true; return true;
  } catch (const std::exception& ex) { s.failed = true; s.classes.clear(); return Error(error, maxlength, ex.what()); }
@@ -269,7 +275,8 @@ bool CBaseNPCClientClassManager::Commit(char* error, size_t maxlength)
  }
  if (actual) { s.failed = true; return Error(error, maxlength, "unexpected public ClientClass entries; PROCESS RESTART REQUIRED"); }
  g_ClientEntityManager.GetProperties().ClearCaches();
- for (auto& cc : s.classes) DumpSchema(cc->storage.m_pNetworkName);
+ if (CBaseNPCNetworkDebugEnabled())
+  for (auto& cc : s.classes) DumpSchema(cc->storage.m_pNetworkName);
  g_pSM->LogMessage(myself, "Finalized client schema: %u stock, %u custom classes, %u ordered RecvTable roots (classname bridge enabled).",
    unsigned(s.stock.size()), unsigned(s.classes.size()), unsigned(s.roots.size()));
  return true;

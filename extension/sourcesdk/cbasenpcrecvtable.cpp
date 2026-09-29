@@ -30,7 +30,7 @@ void RecvTable::Construct(RecvProp* props, int count, const char* name)
 namespace {
 using Kind = CBaseNPCSendFieldKind;
 // Function-local storage avoids static initialization order dependencies.
-auto& Fields() { static std::unordered_map<const RecvProp*, CBaseNPCRecvField> fields; return fields; }
+auto& Fields() { static std::unordered_map<const RecvProp*, const CBaseNPCRecvField*> fields; return fields; }
 RecvProp DataTable(const char* name, RecvTable* table)
 {
  RecvProp prop; prop.m_pVarName = name; prop.m_RecvType = DPT_DataTable;
@@ -50,9 +50,18 @@ CBaseNPCRecvTable::CBaseNPCRecvTable(const char* name, size_t fields, RecvTable*
 CBaseNPCRecvTable::~CBaseNPCRecvTable()
 { for (auto prop : m_Registered) Fields().erase(prop); }
 void CBaseNPCRecvTable::Register(RecvProp* prop, const CBaseNPCRecvField& field)
-{ Fields().emplace(prop, field); m_Registered.push_back(prop); }
+{
+ m_Fields.push_back(field);
+ const auto metadata = &m_Fields.back();
+ prop->SetExtraData(metadata);
+ Fields().emplace(prop, metadata);
+ m_Registered.push_back(prop);
+}
 const CBaseNPCRecvField* CBaseNPCRecvTable::FindField(const RecvProp* prop)
-{ auto i = Fields().find(prop); return i == Fields().end() ? nullptr : &i->second; }
+{
+ g_ClientEntityManager.RecordSlowRecvMetadataLookup();
+ auto i = Fields().find(prop); return i == Fields().end() ? nullptr : i->second;
+}
 bool CBaseNPCRecvTable::IsCustom(const RecvProp* prop) { return FindField(prop) != nullptr; }
 
 bool CBaseNPCRecvTable::BuildField(size_t index, const typedescription_t& td,
@@ -103,6 +112,7 @@ bool CBaseNPCRecvTable::BuildField(size_t index, const typedescription_t& td,
    m_ArrayProps.push_back(std::move(props)); m_ArrayTables.push_back(std::move(table));
  }
  m_Size = offset + size * td.fieldSize;
+ if (desc.kind == Kind::EHandle) m_EHandleInitRanges.push_back({offset, td.fieldSize, size});
  return true;
 }
 
@@ -121,9 +131,14 @@ void CBaseNPCRecvTable::InitializeStorage(RecvTable* table, unsigned char* bytes
 void CBaseNPCRecvTable::Receive(const CRecvProxyData* data, void* object, void*)
 {
  if (!data) return;
- auto field = FindField(data->m_pRecvProp);
+ // This proxy is attached only to CBaseNPC-owned leaf RecvProps. Their stable
+ // metadata is installed in m_pExtraData while the schema is built, avoiding
+ // a global RecvProp hash lookup on every network update.
+ auto field = data->m_pRecvProp
+   ? static_cast<const CBaseNPCRecvField*>(data->m_pRecvProp->GetExtraData()) : nullptr;
  if (!field) return;
- auto out = g_ClientEntityManager.GetSidecarAddress(object, field->offset, field->elementSize);
+ auto out = g_ClientEntityManager.GetNetworkSidecarAddress(
+   data->m_ObjectID, object, field->offset, field->elementSize);
  if (!out) return;
  switch (field->kind) {
  case Kind::Bool: *out = data->m_Value.m_Int != 0; break;

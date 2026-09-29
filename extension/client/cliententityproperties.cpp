@@ -41,6 +41,15 @@ void *ResolveEntity(IPluginContext *context, int clientRef)
   return entity;
 }
 
+bool ResolvePropertyAccess(IPluginContext *context, int clientRef,
+                           CBaseNPCClientEntityAccess *access)
+{
+  if (g_ClientEntityManager.ResolveAccess(clientRef, *access))
+    return true;
+  context->ThrowNativeError("Client entity reference 0x%08X is invalid", clientRef);
+  return false;
+}
+
 bool ValidateOffset(IPluginContext *context, int64_t offset, bool allowZero = false)
 {
   if (offset < (allowZero ? 0 : 1) || offset > kMaximumEntityOffset)
@@ -85,18 +94,20 @@ bool FindRecvPropInfo(RecvTable *table, const char *name, RecvPropInfo *result)
   return g_ClientEntityManager.GetProperties().FindRecvPropInfo(table, name, result);
 }
 
-datamap_t *GetDataMap(IPluginContext *context, void *entity)
+datamap_t *GetDataMap(IPluginContext *context,
+                      const CBaseNPCClientEntityAccess& access)
 {
-  datamap_t *map = g_ClientEntityManager.GetClientDataMap(entity);
+  datamap_t *map = access.dataMap;
   if (!map)
     context->ThrowNativeError("Could not retrieve client datamap");
   return map;
 }
 
-bool GetRecvRoot(IPluginContext *context, void *entity,
+bool GetRecvRoot(IPluginContext *context,
+                 const CBaseNPCClientEntityAccess& access,
                  ClientClass **clientClass, RecvTable **table, uint8_t **base)
 {
-  *clientClass = g_ClientEntityManager.GetClientClass(entity);
+  *clientClass = access.clientClass;
   if (!*clientClass || !(*clientClass)->m_pRecvTable)
   {
     context->ThrowNativeError("Could not retrieve client network class/RecvTable");
@@ -104,8 +115,7 @@ bool GetRecvRoot(IPluginContext *context, void *entity,
   }
 
   *table = (*clientClass)->m_pRecvTable;
-  *base = static_cast<uint8_t *>(
-    g_ClientEntityManager.GetClientRecvTableBase(entity));
+  *base = access.recvBase;
   if (!*base)
   {
     context->ThrowNativeError("Client networkable returned a null data-table base pointer");
@@ -123,28 +133,30 @@ bool GetPropertyName(IPluginContext *context, cell_t parameter, char **name)
   return false;
 }
 
-bool FindDataProperty(IPluginContext *context, void *entity, int clientRef,
+bool FindDataProperty(IPluginContext *context,
+                      const CBaseNPCClientEntityAccess& access,
                       const char *name, DataMapInfo *info)
 {
-  datamap_t *map = GetDataMap(context, entity);
+  datamap_t *map = GetDataMap(context, access);
   if (!map)
     return false;
 
   if (FindDataMapInfo(map, name, info))
     return true;
 
-  const char *classname = g_ClientEntityManager.GetEntityClassnameClient(clientRef);
   context->ThrowNativeError("Property \"%s\" not found (client entity 0x%08X/%s)",
-                            name, clientRef, classname ? classname : "");
+                            name, access.clientRef,
+                            access.classname ? access.classname : "");
   return false;
 }
 
-bool FindRecvProperty(IPluginContext *context, void *entity, int clientRef,
+bool FindRecvProperty(IPluginContext *context,
+                      const CBaseNPCClientEntityAccess& access,
                       const char *name, RecvPropInfo *info, uint8_t **base)
 {
   ClientClass *clientClass = nullptr;
   RecvTable *table = nullptr;
-  if (!GetRecvRoot(context, entity, &clientClass, &table, base))
+  if (!GetRecvRoot(context, access, &clientClass, &table, base))
     return false;
 
   if (FindRecvPropInfo(table, name, info))
@@ -155,15 +167,22 @@ bool FindRecvProperty(IPluginContext *context, void *entity, int clientRef,
     }
     if (info->sidecar) {
       const auto field = info->sidecar;
-      *base = g_ClientEntityManager.GetSidecarAddress(entity, 0, field->offset + field->elementCount * field->stride);
-      if (!*base) { context->ThrowNativeError("Client sidecar is unavailable or field exceeds its allocation"); return false; }
+      const bool offsetValid = field->offset <= access.sidecarSize;
+      const bool overflow = !offsetValid || (field->stride &&
+        field->elementCount > (access.sidecarSize - field->offset) / field->stride);
+      const size_t required = overflow ? access.sidecarSize + 1 :
+        field->offset + field->elementCount * field->stride;
+      *base = access.sidecar;
+      if (!*base || required > access.sidecarSize) {
+        context->ThrowNativeError("Client sidecar is unavailable or field exceeds its allocation"); return false;
+      }
     }
     return true;
   }
 
-  const char *classname = g_ClientEntityManager.GetEntityClassnameClient(clientRef);
   context->ThrowNativeError("RecvProp \"%s\" not found (client entity 0x%08X/%s, netclass %s)",
-                            name, clientRef, classname ? classname : "",
+                            name, access.clientRef,
+                            access.classname ? access.classname : "",
                             clientClass->GetName() ? clientClass->GetName() : "");
   return false;
 }
@@ -627,8 +646,8 @@ cell_t Native_GetEntSendPropOffsClient(IPluginContext *context, const cell_t *pa
 
 cell_t Native_HasEntPropClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
@@ -636,13 +655,13 @@ cell_t Native_HasEntPropClient(IPluginContext *context, const cell_t *params)
 
   if (params[2] == kPropData)
   {
-    datamap_t *map = g_ClientEntityManager.GetClientDataMap(entity);
+    datamap_t *map = access.dataMap;
     DataMapInfo info;
     return map && FindDataMapInfo(map, name, &info) ? 1 : 0;
   }
   if (params[2] == kPropSend)
   {
-    ClientClass *clientClass = g_ClientEntityManager.GetClientClass(entity);
+    ClientClass *clientClass = access.clientClass;
     RecvPropInfo info;
     return clientClass && FindRecvPropInfo(clientClass->m_pRecvTable, name, &info) ? 1 : 0;
   }
@@ -651,8 +670,8 @@ cell_t Native_HasEntPropClient(IPluginContext *context, const cell_t *params)
 
 cell_t Native_GetEntPropArraySizeClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
@@ -661,7 +680,7 @@ cell_t Native_GetEntPropArraySizeClient(IPluginContext *context, const cell_t *p
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     return info.prop->fieldSize;
   }
@@ -669,7 +688,7 @@ cell_t Native_GetEntPropArraySizeClient(IPluginContext *context, const cell_t *p
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     if (info.prop->GetType() == DPT_Array)
       return info.prop->GetNumElements();
@@ -682,9 +701,10 @@ cell_t Native_GetEntPropArraySizeClient(IPluginContext *context, const cell_t *p
 
 cell_t Native_GetEntPropClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -693,7 +713,7 @@ cell_t Native_GetEntPropClient(IPluginContext *context, const cell_t *params)
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     const int bits = MatchDataInteger(info.prop->fieldType);
     if (!bits)
@@ -709,7 +729,7 @@ cell_t Native_GetEntPropClient(IPluginContext *context, const cell_t *params)
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Int, "integer", &resolved))
@@ -726,9 +746,10 @@ cell_t Native_GetEntPropClient(IPluginContext *context, const cell_t *params)
 
 cell_t Native_SetEntPropClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -739,7 +760,7 @@ cell_t Native_SetEntPropClient(IPluginContext *context, const cell_t *params)
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     bits = MatchDataInteger(info.prop->fieldType);
     if (!bits)
@@ -754,7 +775,7 @@ cell_t Native_SetEntPropClient(IPluginContext *context, const cell_t *params)
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Int, "integer", &resolved))
@@ -775,9 +796,10 @@ cell_t Native_SetEntPropClient(IPluginContext *context, const cell_t *params)
 
 cell_t Native_GetEntPropFloatClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -787,7 +809,7 @@ cell_t Native_GetEntPropFloatClient(IPluginContext *context, const cell_t *param
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     if (info.prop->fieldType != FIELD_FLOAT && info.prop->fieldType != FIELD_TIME)
       return context->ThrowNativeError("Data field %s is not a float (%d)",
@@ -801,7 +823,7 @@ cell_t Native_GetEntPropFloatClient(IPluginContext *context, const cell_t *param
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Float, "float", &resolved))
@@ -817,9 +839,10 @@ cell_t Native_GetEntPropFloatClient(IPluginContext *context, const cell_t *param
 
 cell_t Native_SetEntPropFloatClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -829,7 +852,7 @@ cell_t Native_SetEntPropFloatClient(IPluginContext *context, const cell_t *param
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     if (info.prop->fieldType != FIELD_FLOAT && info.prop->fieldType != FIELD_TIME)
       return context->ThrowNativeError("Data field %s is not a float (%d)",
@@ -843,7 +866,7 @@ cell_t Native_SetEntPropFloatClient(IPluginContext *context, const cell_t *param
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Float, "float", &resolved))
@@ -860,9 +883,13 @@ cell_t Native_SetEntPropFloatClient(IPluginContext *context, const cell_t *param
 
 cell_t Native_GetEntPropEntClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  // Preserve SourceMod's stock Prop_Send behavior: any integer RecvProp may
+  // carry an encoded handle. Only custom sidecar fields have explicit kind
+  // metadata and are therefore required to be declared as EHandle.
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return -1;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return -1;
@@ -871,7 +898,7 @@ cell_t Native_GetEntPropEntClient(IPluginContext *context, const cell_t *params)
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return -1;
     int offset = 0;
     if (!ResolveDataElement(context, name, info, element, &offset))
@@ -893,7 +920,7 @@ cell_t Native_GetEntPropEntClient(IPluginContext *context, const cell_t *params)
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return -1;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Int, "entity handle", &resolved))
@@ -905,9 +932,12 @@ cell_t Native_GetEntPropEntClient(IPluginContext *context, const cell_t *params)
 
 cell_t Native_SetEntPropEntClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  // The stock integer ambiguity is intentional here too; custom sidecars are
+  // strict because their schema records an explicit field kind.
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -925,7 +955,7 @@ cell_t Native_SetEntPropEntClient(IPluginContext *context, const cell_t *params)
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     int offset = 0;
     if (!ResolveDataElement(context, name, info, element, &offset))
@@ -953,7 +983,7 @@ cell_t Native_SetEntPropEntClient(IPluginContext *context, const cell_t *params)
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Int, "entity handle", &resolved))
@@ -967,9 +997,10 @@ cell_t Native_SetEntPropEntClient(IPluginContext *context, const cell_t *params)
 
 cell_t Native_GetEntPropVectorClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -980,7 +1011,7 @@ cell_t Native_GetEntPropVectorClient(IPluginContext *context, const cell_t *para
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     if (info.prop->fieldType != FIELD_VECTOR &&
         info.prop->fieldType != FIELD_POSITION_VECTOR)
@@ -995,7 +1026,7 @@ cell_t Native_GetEntPropVectorClient(IPluginContext *context, const cell_t *para
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Vector, "vector", &resolved))
@@ -1019,9 +1050,10 @@ cell_t Native_GetEntPropVectorClient(IPluginContext *context, const cell_t *para
 
 cell_t Native_SetEntPropVectorClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -1032,7 +1064,7 @@ cell_t Native_SetEntPropVectorClient(IPluginContext *context, const cell_t *para
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     if (info.prop->fieldType != FIELD_VECTOR &&
         info.prop->fieldType != FIELD_POSITION_VECTOR)
@@ -1047,7 +1079,7 @@ cell_t Native_SetEntPropVectorClient(IPluginContext *context, const cell_t *para
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Vector, "vector", &resolved))
@@ -1070,9 +1102,10 @@ cell_t Native_SetEntPropVectorClient(IPluginContext *context, const cell_t *para
 
 cell_t Native_GetEntPropStringClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   if (!GetPropertyName(context, params[3], &name))
     return 0;
@@ -1082,7 +1115,7 @@ cell_t Native_GetEntPropStringClient(IPluginContext *context, const cell_t *para
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     const fieldtype_t type = info.prop->fieldType;
     if (type != FIELD_CHARACTER && type != FIELD_STRING &&
@@ -1109,7 +1142,7 @@ cell_t Native_GetEntPropStringClient(IPluginContext *context, const cell_t *para
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_String, "string", &resolved))
@@ -1131,9 +1164,10 @@ cell_t Native_GetEntPropStringClient(IPluginContext *context, const cell_t *para
 
 cell_t Native_SetEntPropStringClient(IPluginContext *context, const cell_t *params)
 {
-  void *entity = ResolveEntity(context, params[1]);
-  if (!entity)
+  CBaseNPCClientEntityAccess access;
+  if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
+  void *entity = access.entity;
   char *name = nullptr;
   char *input = nullptr;
   if (!GetPropertyName(context, params[3], &name))
@@ -1146,7 +1180,7 @@ cell_t Native_SetEntPropStringClient(IPluginContext *context, const cell_t *para
   if (params[2] == kPropData)
   {
     DataMapInfo info;
-    if (!FindDataProperty(context, entity, params[1], name, &info))
+    if (!FindDataProperty(context, access, name, &info))
       return 0;
     const fieldtype_t type = info.prop->fieldType;
     if (type != FIELD_CHARACTER && type != FIELD_STRING &&
@@ -1176,7 +1210,7 @@ cell_t Native_SetEntPropStringClient(IPluginContext *context, const cell_t *para
   {
     RecvPropInfo info;
     uint8_t *base = nullptr;
-    if (!FindRecvProperty(context, entity, params[1], name, &info, &base))
+    if (!FindRecvProperty(context, access, name, &info, &base))
       return 0;
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_String, "string", &resolved))
@@ -1199,6 +1233,8 @@ bool CClientEntityProperties::FindDataMapInfo(datamap_t *map, const char *name,
   if (!result || !map || !name || !*name) return false;
   auto &cache = dataMaps_[map];
   auto found = cache.find(name);
+  if (CBaseNPCNetworkDebugEnabled())
+    found == cache.end() ? ++cacheMisses_ : ++cacheHits_;
   if (found == cache.end())
   {
     ClientDataMapInfo info;
@@ -1215,6 +1251,8 @@ bool CClientEntityProperties::FindRecvPropInfo(RecvTable *table, const char *nam
   if (!result || !table || !name || !*name) return false;
   auto &cache = recvTables_[table];
   auto found = cache.find(name);
+  if (CBaseNPCNetworkDebugEnabled())
+    found == cache.end() ? ++cacheMisses_ : ++cacheHits_;
   if (found == cache.end())
   {
     ClientRecvPropInfo info;

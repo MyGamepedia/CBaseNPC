@@ -401,8 +401,9 @@ void CBaseNPCExt::SDK_OnUnload()
 	if (g_CBaseNPCNetworkSchemaManager.IsPublished()) {
 		// IExtensionInterface has no unload veto. Do not invalidate the engine's
 		// schema/proxy/thunk pointers or revert its public lists during teardown.
-		// A retained OS module alone is insufficient: keep managers/hooks too.
-		g_pSM->LogError(myself, "CBaseNPC runtime unload after network publication is unsupported. Schema, code and engine hooks retained; PROCESS RESTART REQUIRED. Do not continue playing or reload the extension.");
+		// Retaining the code module prevents dangling function pointers, but does
+		// not make SourceHook registrations or a hot reload safe.
+		g_pSM->LogError(myself, "CBaseNPC unload after network publication is unsupported and leaves the process unsafe. PROCESS RESTART REQUIRED immediately; do not continue playing or reload the extension.");
 		g_CBaseNPCNetworkSchemaManager.StopAfterUnload();
 #if SOURCE_ENGINE == SE_BMS
 		g_PluginClientEntityFactories.Shutdown();
