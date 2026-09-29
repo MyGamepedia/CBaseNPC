@@ -90,7 +90,7 @@ public:
   void AddClientEntityListener(SourceMod::ICBaseNPCClientEntityListener *listener) override;
   void RemoveClientEntityListener(SourceMod::ICBaseNPCClientEntityListener *listener) override;
 
-  int FindClientEntityByClassname(int startRef, const char *classname) const;
+  int FindClientEntityByClassname(int startRef, const char *classname);
   bool GetEntityClassnameDiagnostics(int clientRef, int *entIndex,
                                      const char **networkName, const char **mapClassname,
                                      const char **clientClassname, const char **replicatedClassname,
@@ -111,6 +111,7 @@ public:
   unsigned char* GetNetworkSidecarAddress(int objectId, void* entity, size_t offset, size_t size);
   void RecordSlowRecvMetadataLookup();
   void RecordSidecarPoolUse(bool reused);
+  void ResetNetworkStats();
   void DumpNetworkStats() const;
   void ReceiveClassname(void* entity, const char* classname);
   bool GetRuntimeDiagnostics(int ref, bool& runtime, size_t& sidecarSize, const char*& table, const char*& physical);
@@ -149,6 +150,7 @@ private:
   void SeedExistingEntities();
   void TrackEntity(C_BaseEntity *entity, bool notify);
   std::string ReadClientClassname(C_BaseEntity *entity) const;
+  const std::string& EnsureEffectiveClassname(C_BaseEntity* entity, EntityRecord& record);
   void NotifyCreated(C_BaseEntity* entity, uint32_t handleValue);
   void CleanupRuntime(C_BaseEntity* entity);
   bool IsTrackedEntity(void *entity) const;
@@ -190,6 +192,11 @@ private:
   uint64_t slowRecvMetadataLookups_ = 0, sidecarPointerLookups_ = 0;
   uint64_t sidecarPoolAllocations_ = 0, sidecarPoolReuses_ = 0;
   uint64_t clientToolsClassnameFallbacks_ = 0;
+  uint64_t networkStatsGeneration_ = 0;
+#if defined(CBASENPC_CLIENT_TESTS)
+  bool testClassnameBridgeEnabled_ = false;
+  std::string (*testClassnameLookup_)(C_BaseEntity*) = nullptr;
+#endif
 };
 
 extern CClientEntityManager g_ClientEntityManager;

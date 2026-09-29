@@ -25,6 +25,7 @@ class CClientEntityProperties final
 {
 public:
   void ClearCaches();
+  void ResetStats() { cacheHits_ = cacheMisses_ = 0; }
   bool FindDataMapInfo(datamap_t *map, const char *name, ClientDataMapInfo *result);
   bool FindRecvPropInfo(RecvTable *table, const char *name, ClientRecvPropInfo *result);
   uint64_t CacheHits() const { return cacheHits_; }

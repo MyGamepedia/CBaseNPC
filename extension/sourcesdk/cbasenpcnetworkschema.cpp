@@ -27,7 +27,14 @@ ConVar cbasenpc_network_debug("cbasenpc_network_debug", "0", FCVAR_NONE,
  NetworkDebugChanged);
 namespace {
 void NetworkDebugChanged(IConVar*, const char*, float)
-{ g_CBaseNPCNetworkDebugEnabled = cbasenpc_network_debug.GetBool(); }
+{
+ const bool enabled = cbasenpc_network_debug.GetBool();
+#if SOURCE_ENGINE == SE_BMS
+ if (enabled && !g_CBaseNPCNetworkDebugEnabled)
+  g_ClientEntityManager.ResetNetworkStats();
+#endif
+ g_CBaseNPCNetworkDebugEnabled = enabled;
+}
 }
 static_assert(CBASENPC_NETWORK_CLASSNAME_LENGTH == DT_MAX_STRING_BUFFERSIZE,
  "Classname bridge must match the engine string encoding limit");

@@ -13,6 +13,12 @@ namespace
 {
 constexpr uint32_t kClientEntRefMask = uint32_t{1} << 31;
 
+const std::string& GenericClassnameFallback()
+{
+  static const std::string fallback("C_BaseEntity");
+  return fallback;
+}
+
 bool ClassnameMatches(const std::string &candidate, const char *pattern)
 {
   if (!pattern)
@@ -303,18 +309,16 @@ void CClientEntityManager::TrackEntity(C_BaseEntity *entity, bool notify)
   // Runtime identity must be installed before consulting IClientTools: its
   // classname accessor can itself call the virtual GetClientClass().
 #if defined(CBASENPC_CLIENT_TESTS)
-  const bool classnameBridgeEnabled = false;
+  const bool classnameBridgeEnabled = testClassnameBridgeEnabled_;
 #else
   const bool classnameBridgeEnabled = g_CBaseNPCNetworkSchemaManager.IsClassnameBridgeEnabled();
 #endif
   auto tracked = entities_.find(entity);
   if (tracked != entities_.end() && !tracked->second.runtimeClass &&
       (entIndex < 0 || !classnameBridgeEnabled)) {
-    const auto clientName = ReadClientClassname(entity);
+    EnsureEffectiveClassname(entity, tracked->second);
     tracked = entities_.find(entity);
     if (tracked == entities_.end() || tracked->second.handleValue != handleValue) return;
-    tracked->second.clientClassname = clientName;
-    if (CBaseNPCNetworkDebugEnabled()) ++clientToolsClassnameFallbacks_;
   }
 
   if (!notify)
@@ -358,6 +362,10 @@ void CClientEntityManager::NotifyCreated(C_BaseEntity* entity, uint32_t handleVa
 
 std::string CClientEntityManager::ReadClientClassname(C_BaseEntity *entity) const
 {
+#if defined(CBASENPC_CLIENT_TESTS)
+  if (testClassnameLookup_)
+    return testClassnameLookup_(entity);
+#endif
   if (!entity || !clientTools_)
     return {};
 
@@ -552,30 +560,30 @@ int CClientEntityManager::GetEntityRefByOrdinalClient(int ordinal) const
 
 const char *CClientEntityManager::GetEntityClassnameClient(int clientRef)
 {
-  auto *entity = static_cast<C_BaseEntity *>(ResolveClientEntityRef(clientRef));
-  if (!entity)
-    return nullptr;
+  C_BaseEntity* entity = nullptr;
+  auto* record = ResolveRecord(clientRef, &entity);
+  if (!record) return nullptr;
+  const uint32_t handleValue = record->handleValue;
+  EnsureEffectiveClassname(entity, *record);
   const auto found = entities_.find(entity);
-  if (found == entities_.end())
-    return nullptr;
-
-  return EffectiveClassname(found->second).c_str();
+  return found != entities_.end() && found->second.handleValue == handleValue
+    ? EffectiveClassname(found->second).c_str() : nullptr;
 }
 
 int CClientEntityManager::FindClientEntityByClassname(
-  int startRef, const char *classname) const
+  int startRef, const char *classname)
 {
   if (!available_) return -1;
-  C_BaseEntity *startEntity = static_cast<C_BaseEntity *>(
-    const_cast<CClientEntityManager *>(this)->ResolveClientEntityRef(startRef));
+  C_BaseEntity *startEntity = static_cast<C_BaseEntity *>(ResolveClientEntityRef(startRef));
+  const auto snapshot = entityOrder_;
   size_t startOrdinal = 0;
   if (startRef != -1)
   {
     bool foundStart = false;
-    for (size_t i = 0; i < entityOrder_.size(); ++i)
+    for (size_t i = 0; i < snapshot.size(); ++i)
     {
-      const auto found = entities_.find(entityOrder_[i]);
-      if (found != entities_.end() && entityOrder_[i] == startEntity)
+      const auto found = entities_.find(snapshot[i]);
+      if (found != entities_.end() && snapshot[i] == startEntity)
       {
         startOrdinal = i + 1;
         foundStart = true;
@@ -586,15 +594,19 @@ int CClientEntityManager::FindClientEntityByClassname(
       return -1;
   }
 
-  for (size_t i = startOrdinal; i < entityOrder_.size(); ++i)
+  for (size_t i = startOrdinal; i < snapshot.size(); ++i)
   {
-    const auto found = entities_.find(entityOrder_[i]);
+    const auto found = entities_.find(snapshot[i]);
     if (found == entities_.end())
       continue;
-
-    const std::string &candidate = EffectiveClassname(found->second);
-    if (!candidate.empty() && ClassnameMatches(candidate, classname))
-      return found->second.clientRef;
+    const uint32_t handleValue = found->second.handleValue;
+    const int clientRef = found->second.clientRef;
+    const std::string &candidate = EnsureEffectiveClassname(snapshot[i], found->second);
+    if (!candidate.empty() && ClassnameMatches(candidate, classname)) {
+      const auto live = entities_.find(snapshot[i]);
+      if (live != entities_.end() && live->second.handleValue == handleValue)
+        return clientRef;
+    }
   }
   return -1;
 }
@@ -607,8 +619,13 @@ bool CClientEntityManager::GetEntityClassnameDiagnostics(
   if (!entity)
     return false;
 
-  const auto found = entities_.find(entity);
+  auto found = entities_.find(entity);
   if (found == entities_.end())
+    return false;
+  const uint32_t handleValue = found->second.handleValue;
+  EnsureEffectiveClassname(entity, found->second);
+  found = entities_.find(entity);
+  if (found == entities_.end() || found->second.handleValue != handleValue)
     return false;
 
   auto *unknown = reinterpret_cast<IClientUnknown *>(entity);
@@ -808,10 +825,41 @@ bool CClientEntityManager::IsTrackedEntity(void *entity) const
 
 const std::string& CClientEntityManager::EffectiveClassname(const EntityRecord& record) const
 {
-  static const std::string fallback("C_BaseEntity");
   if (!record.replicatedClassname.empty()) return record.replicatedClassname;
   if (!record.clientClassname.empty()) return record.clientClassname;
-  return fallback;
+  return GenericClassnameFallback();
+}
+
+const std::string& CClientEntityManager::EnsureEffectiveClassname(
+  C_BaseEntity* entity, EntityRecord& record)
+{
+  if (!record.replicatedClassname.empty() || !record.clientClassname.empty())
+    return EffectiveClassname(record);
+
+  if (record.runtimeClass) {
+    const char* runtimeName = record.runtimeClass->storage.m_pMapClassname;
+    if (runtimeName && *runtimeName) {
+      record.clientClassname.assign(runtimeName);
+      return record.clientClassname;
+    }
+    return GenericClassnameFallback();
+  }
+
+  const uint32_t handleValue = record.handleValue;
+  std::string resolved = ReadClientClassname(entity);
+  auto found = entities_.find(entity);
+  if (found == entities_.end() || found->second.handleValue != handleValue)
+    return GenericClassnameFallback();
+  if (!found->second.replicatedClassname.empty())
+    return found->second.replicatedClassname;
+  if (!found->second.clientClassname.empty())
+    return found->second.clientClassname;
+  if (!resolved.empty()) {
+    found->second.clientClassname = std::move(resolved);
+    if (CBaseNPCNetworkDebugEnabled()) ++clientToolsClassnameFallbacks_;
+    return found->second.clientClassname;
+  }
+  return GenericClassnameFallback();
 }
 
 void CClientEntityManager::ClearNetworkSlot(EntityRecord& record, C_BaseEntity* entity)
@@ -1016,10 +1064,8 @@ void CClientEntityManager::FlushPendingCreates()
   for (const auto& item : pending) {
     auto found = entities_.find(item.entity);
     if (found != entities_.end() && found->second.handleValue == item.handleValue &&
-        found->second.replicatedClassname.empty() && found->second.clientClassname.empty()) {
-      found->second.clientClassname = ReadClientClassname(item.entity);
-      if (CBaseNPCNetworkDebugEnabled()) ++clientToolsClassnameFallbacks_;
-    }
+        found->second.replicatedClassname.empty() && found->second.clientClassname.empty())
+      EnsureEffectiveClassname(item.entity, found->second);
     NotifyCreated(item.entity, item.handleValue);
   }
 }
@@ -1038,10 +1084,12 @@ void CClientEntityManager::PurgeEntities()
 void CClientEntityManager::DumpNetworkStats() const
 {
 #if defined(CBASENPC_CLIENT_TESTS)
-  std::printf("[CBASENPC] network stats: RecvProxy=%llu slow-metadata-lookups=%llu ObjectID-misses=%llu sidecar-map-lookups=%llu pool-allocations=%llu pool-reuses=%llu client-tools-classname-fallbacks=%llu property-cache-hits=%llu property-cache-misses=%llu\n",
+  std::printf("[CBASENPC] network statistics (collection: %s, sample generation: %llu)\nRecvProxy calls: %llu\nslow metadata lookups: %llu\nObjectID slot misses: %llu\nsidecar map lookups: %llu\npool allocations: %llu\npool reuses: %llu\nclient-tools classname fallbacks: %llu\nproperty cache hits: %llu\nproperty cache misses: %llu\n",
 #else
-  Msg("[CBASENPC] network stats: RecvProxy=%llu slow-metadata-lookups=%llu ObjectID-misses=%llu sidecar-map-lookups=%llu pool-allocations=%llu pool-reuses=%llu client-tools-classname-fallbacks=%llu property-cache-hits=%llu property-cache-misses=%llu\n",
+  Msg("[CBASENPC] network statistics (collection: %s, sample generation: %llu)\nRecvProxy calls: %llu\nslow metadata lookups: %llu\nObjectID slot misses: %llu\nsidecar map lookups: %llu\npool allocations: %llu\npool reuses: %llu\nclient-tools classname fallbacks: %llu\nproperty cache hits: %llu\nproperty cache misses: %llu\n",
 #endif
+    CBaseNPCNetworkDebugEnabled() ? "ENABLED" : "DISABLED",
+    static_cast<unsigned long long>(networkStatsGeneration_),
     static_cast<unsigned long long>(recvProxyCalls_),
     static_cast<unsigned long long>(slowRecvMetadataLookups_),
     static_cast<unsigned long long>(objectIdSlotMisses_),
@@ -1051,6 +1099,19 @@ void CClientEntityManager::DumpNetworkStats() const
     static_cast<unsigned long long>(clientToolsClassnameFallbacks_),
     static_cast<unsigned long long>(properties_.CacheHits()),
     static_cast<unsigned long long>(properties_.CacheMisses()));
+}
+
+void CClientEntityManager::ResetNetworkStats()
+{
+  recvProxyCalls_ = 0;
+  slowRecvMetadataLookups_ = 0;
+  objectIdSlotMisses_ = 0;
+  sidecarPointerLookups_ = 0;
+  sidecarPoolAllocations_ = 0;
+  sidecarPoolReuses_ = 0;
+  clientToolsClassnameFallbacks_ = 0;
+  properties_.ResetStats();
+  ++networkStatsGeneration_;
 }
 
 bool CClientEntityManager::GetRuntimeDiagnostics(int ref, bool& runtime, size_t& sidecarSize,
@@ -1073,4 +1134,9 @@ void CClientEntityManager::Hook_LevelShutdown()
 { PurgeEntities(); RETURN_META(MRES_IGNORED); }
 CON_COMMAND(cbasenpc_dump_network_stats, "Dump CBaseNPC client networking hot-path counters")
 { g_ClientEntityManager.DumpNetworkStats(); }
+CON_COMMAND(cbasenpc_reset_network_stats, "Reset CBaseNPC client networking hot-path counters")
+{
+  g_ClientEntityManager.ResetNetworkStats();
+  Msg("[CBASENPC] network statistics reset.\n");
+}
 #endif
