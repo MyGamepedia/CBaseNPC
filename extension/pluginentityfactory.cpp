@@ -7,8 +7,6 @@
 #include "sh_pagealloc.h"
 #include "sourcesdk/cbasenpcserverclass.h"
 
-SH_DECL_HOOK0(IServerNetworkable, GetServerClass, SH_NOATTRIB, 0, ServerClass*);
-
 SH_DECL_MANUALHOOK0(FactoryEntity_GetDataDescMap, 0, 0, 0, datamap_t* );
 SH_DECL_MANUALHOOK0_void(FactoryEntity_UpdateOnRemove, 0, 0, 0 );
 
@@ -530,13 +528,6 @@ bool PluginFactoryEntityRecord_t::Hook(bool bHookDestructor)
 		return true;
 	}
 	m_bHooked = true;
-	if (m_pNetworkable && m_pServerClass)
-	{
-		int hook = SH_ADD_HOOK(IServerNetworkable, GetServerClass, m_pNetworkable,
-			SH_MEMBER(this, &PluginFactoryEntityRecord_t::Hook_GetServerClass), false);
-		if (!hook) return false;
-		m_pHookIds.push_back(hook);
-	}
 
 	m_pHookIds.push_back( SH_ADD_MANUALHOOK(FactoryEntity_GetDataDescMap, pEntity, SH_MEMBER(this, &PluginFactoryEntityRecord_t::Hook_GetDataDescMap), false) );
 	m_pHookIds.push_back( SH_ADD_MANUALHOOK(FactoryEntity_UpdateOnRemove, pEntity, SH_MEMBER(g_pPluginEntityFactories, &CPluginEntityFactories::Hook_UpdateOnRemove), false) );
@@ -597,13 +588,6 @@ PluginFactoryEntityRecord_t::~PluginFactoryEntityRecord_t()
 			SH_REMOVE_HOOK_ID((*it));
 		}
 	}
-	m_pNetworkable = nullptr;
-	m_pServerClass = nullptr;
-}
-
-ServerClass* PluginFactoryEntityRecord_t::Hook_GetServerClass()
-{
-	RETURN_META_VALUE(MRES_SUPERCEDE, m_pServerClass);
 }
 
 datamap_t* PluginFactoryEntityRecord_t::Hook_GetDataDescMap()
@@ -1010,6 +994,18 @@ IServerNetworkable* CPluginEntityFactory::RecursiveCreate(const char* classname,
 	if (pNet)
 	{
 		CBaseEntity* pEnt = pNet->GetBaseEntity();
+		if (bIsInstantiating)
+		{
+			// Retail CServerNetworkProperty already has an immutable ServerClass
+			// cache for this networking hot path. Initialize it before datamap
+			// construction, plugin callbacks, or exposure to snapshot workers so
+			// GetServerClass never has to enter SourceHook on a worker thread.
+			ServerClass* pServerClass = pCreatingFactory->GetEffectiveServerClass();
+			if (pServerClass)
+			{
+				pEnt->NetworkProp()->SetCachedServerClass(pServerClass);
+			}
+		}
 
 		if (HasDataDesc())
 		{
@@ -1020,8 +1016,6 @@ IServerNetworkable* CPluginEntityFactory::RecursiveCreate(const char* classname,
 		if (bIsInstantiating)
 		{
 			pEntityRecord->pFactory = pCreatingFactory;
-			pEntityRecord->m_pServerClass = pCreatingFactory->GetEffectiveServerClass();
-			if (pEntityRecord->m_pServerClass) pEntityRecord->m_pNetworkable = pNet;
 
 			IPluginFunction* nextBotFactory = nullptr;
 			CBaseNPCPluginActionFactory* pInitialActionFactory = nullptr;
@@ -1078,7 +1072,7 @@ IServerNetworkable* CPluginEntityFactory::RecursiveCreate(const char* classname,
 		{
 			if (!pEntityRecord->Hook(bHookDestructor))
 			{
-				g_pSM->LogError(myself, "Cannot hook IServerNetworkable::GetServerClass for %s", classname);
+				g_pSM->LogError(myself, "Cannot install entity hooks for %s", classname);
 				DestroyUserEntityData(pEnt);
 				g_pPluginEntityFactories->RemoveRecord(pEnt);
 				servertools->RemoveEntityImmediate(pEnt);

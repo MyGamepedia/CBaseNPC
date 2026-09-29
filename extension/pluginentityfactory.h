@@ -47,8 +47,6 @@ public:
 	INextBot* m_pNextBot = nullptr;
 	CBaseNPCPluginActionFactory* m_pInitialActionFactory = nullptr;
 	CBaseNPCIntention* m_pIntentionInterface = nullptr;
-	IServerNetworkable* m_pNetworkable = nullptr;
-	ServerClass* m_pServerClass = nullptr;
 
 	bool Hook(bool bHookDestructor = true);
 
@@ -58,7 +56,6 @@ public:
 	datamap_t* Hook_GetDataDescMap();
 	INextBot* Hook_MyNextBotPointer();
 	IIntention* Hook_GetIntentionInterface();
-	ServerClass* Hook_GetServerClass();
 
 private:
 	bool m_bHooked = false;
