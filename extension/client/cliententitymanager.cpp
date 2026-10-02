@@ -11,7 +11,6 @@
 
 namespace
 {
-constexpr uint32_t kClientEntRefMask = uint32_t{1} << 31;
 
 const std::string& GenericClassnameFallback()
 {
@@ -293,12 +292,16 @@ void CClientEntityManager::TrackEntity(C_BaseEntity *entity, bool notify)
   IClientNetworkable *networkable = unknown->GetClientNetworkable();
   const int entIndex = networkable ? networkable->entindex() : -1;
   EntityRecord record;
-  record.clientRef = entIndex >= 0 ? entIndex : handle.ToInt();
+  // Exhaustion must fail closed: recycling a token would revive stale refs.
+  if (nextClientToken_ >= -1) return;
+  record.durableRef = static_cast<int>(nextClientToken_++);
+  record.clientRef = entIndex >= 0 && entIndex < MAX_EDICTS ? entIndex : record.durableRef;
   record.handleValue = static_cast<uint32_t>(handle.ToInt());
 
   const uint32_t handleValue = record.handleValue;
   record.createdNotified = !notify;
   entities_.emplace(entity, std::move(record));
+  clientTokens_.emplace(entities_.at(entity).durableRef, entity);
   entityOrder_.push_back(entity);
 
 #ifndef CBASENPC_CLIENT_TESTS
@@ -431,6 +434,7 @@ void CClientEntityManager::OnEntityDeleted(C_BaseEntity *entity)
   if (found != entities_.end() && found->second.handleValue == handleValue)
   {
     entityOrder_.erase(std::remove(entityOrder_.begin(), entityOrder_.end(), entity), entityOrder_.end());
+    clientTokens_.erase(found->second.durableRef);
     entities_.erase(found);
   }
 }
@@ -444,14 +448,11 @@ void *CClientEntityManager::ResolveClientEntityRef(int clientRef)
 CClientEntityManager::EntityRecord* CClientEntityManager::ResolveRecord(
   int clientRef, C_BaseEntity** resolvedEntity)
 {
-  const uint32_t encodedRef = static_cast<uint32_t>(clientRef);
-  if (!available_ || !clientEntityList_ || encodedRef == INVALID_EHANDLE_INDEX)
+  if (!available_ || !clientEntityList_ || clientRef == -1)
     return nullptr;
 
-  // BCompat refs for networked entities are raw entindices. Proper refs carry
-  // the high-bit marker and encode the client CBaseHandle plus its serial.
-  const bool properRef = (encodedRef & kClientEntRefMask) != 0;
-  if (!properRef && clientRef >= 0 && clientRef < MAX_EDICTS)
+  // BCompat refs are entindices; durable refs are unrelated opaque tokens.
+  if (clientRef >= 0 && clientRef < MAX_EDICTS)
   {
     IClientEntity *clientEntity = clientEntityList_->GetClientEntity(clientRef);
     if (!clientEntity)
@@ -466,17 +467,18 @@ CClientEntityManager::EntityRecord* CClientEntityManager::ResolveRecord(
     return &found->second;
   }
 
-  const uint32_t handleValue = properRef
-    ? encodedRef & ~kClientEntRefMask
-    : encodedRef;
+  const auto token = clientTokens_.find(clientRef);
+  if (token == clientTokens_.end()) return nullptr;
+  const auto found = entities_.find(token->second);
+  if (found == entities_.end() || found->second.durableRef != clientRef) return nullptr;
+  const uint32_t handleValue = found->second.handleValue;
   const CBaseHandle handle(static_cast<unsigned long>(handleValue));
   IClientUnknown *unknown = clientEntityList_->GetClientUnknownFromHandle(handle);
   if (!unknown || unknown->GetRefEHandle() != handle)
     return nullptr;
 
   C_BaseEntity *entity = unknown->GetBaseEntity();
-  const auto found = entities_.find(entity);
-  if (found == entities_.end() || found->second.handleValue != handleValue)
+  if (entity != token->second)
     return nullptr;
   if (resolvedEntity) *resolvedEntity = entity;
   return &found->second;
@@ -519,7 +521,7 @@ int CClientEntityManager::EntityToClientHandleRef(void *entityAddress)
   if (found == entities_.end())
     return -1;
 
-  return static_cast<int>(found->second.handleValue | kClientEntRefMask);
+  return found->second.durableRef;
 }
 
 bool CClientEntityManager::IsSameClientEntity(void *entityAddress,
@@ -528,20 +530,9 @@ bool CClientEntityManager::IsSameClientEntity(void *entityAddress,
   if (!IsTrackedEntity(entityAddress))
     return false;
 
-  const uint32_t encodedRef = static_cast<uint32_t>(clientHandleRef);
-  if ((encodedRef & kClientEntRefMask) == 0 ||
-      encodedRef == INVALID_EHANDLE_INDEX)
-  {
-    return false;
-  }
-
-  const uint32_t expectedHandle = encodedRef & ~kClientEntRefMask;
-  if (ResolveClientEntityRef(clientHandleRef) != entityAddress)
-    return false;
-  auto *unknown = reinterpret_cast<IClientUnknown *>(entityAddress);
-  const CBaseHandle &currentHandle = unknown->GetRefEHandle();
-  return currentHandle.IsValid() &&
-         static_cast<uint32_t>(currentHandle.ToInt()) == expectedHandle;
+  const auto token = clientTokens_.find(clientHandleRef);
+  return token != clientTokens_.end() && token->second == entityAddress &&
+         ResolveClientEntityRef(clientHandleRef) == entityAddress;
 }
 
 int CClientEntityManager::GetClientEntityCount() const
@@ -681,7 +672,7 @@ int CClientEntityManager::EntIndexToEntRefClient(int entIndex) const
       found->second.handleValue != static_cast<uint32_t>(handle.ToInt()))
     return -1;
 
-  return static_cast<int>(found->second.handleValue | kClientEntRefMask);
+  return found->second.durableRef;
 }
 
 datamap_t *CClientEntityManager::GetClientDataMap(void *entity) const
@@ -914,6 +905,7 @@ void CClientEntityManager::Shutdown()
   properties_.ClearCaches();
   entityOrder_.clear();
   entities_.clear();
+  clientTokens_.clear();
   networkSidecars_.fill({});
   clientTools_ = nullptr;
   standardRecvProxies_ = nullptr;
@@ -1077,6 +1069,7 @@ void CClientEntityManager::PurgeEntities()
   const auto snapshot = entityOrder_;
   for (auto entity : snapshot) OnEntityDeleted(entity);
   entityOrder_.clear(); entities_.clear();
+  clientTokens_.clear();
   networkSidecars_.fill({});
   purging_ = false;
 }

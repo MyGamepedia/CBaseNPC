@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <array>
 #include <memory>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -129,6 +130,7 @@ private:
   struct EntityRecord
   {
     int clientRef;
+    int durableRef;
     uint32_t handleValue;
     bool deleting = false;
     std::string clientClassname;
@@ -173,6 +175,9 @@ private:
   IForward *onEntityCreated_ = nullptr;
   IForward *onEntityDestroyed_ = nullptr;
   std::unordered_map<C_BaseEntity *, EntityRecord> entities_;
+  // Negative opaque tokens never reuse a value, even across map changes.
+  std::unordered_map<int, C_BaseEntity*> clientTokens_;
+  int64_t nextClientToken_ = (std::numeric_limits<int>::min)();
   struct NetworkSidecarSlot {
     C_BaseEntity* entity = nullptr;
     unsigned char* sidecar = nullptr;

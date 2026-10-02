@@ -64,6 +64,13 @@ methodmap CBaseEntity
 	public native void NetworkStateChanged();
 
 	/**
+	 * Changes m_iClassname and marks the entity's networking state dirty.
+	 * Raw SetEntPropString(Prop_Data, "m_iClassname", ...) requires a separate
+	 * NetworkStateChanged() call to update the synthetic classname SendProp.
+	 */
+	public native void SetClassname(const char[] classname);
+
+	/**
 	 * Informs the server that this specific networked var changed value.
 	 *
 	 * @param varAddr	Entity networked property address.

@@ -6,9 +6,11 @@
 #define SMINTERFACE_CBASENPC_CLIENT_ENTITY_MANAGER_NAME "ICBaseNPCClientEntityManager"
 #define SMINTERFACE_CBASENPC_CLIENT_ENTITY_MANAGER_VERSION 1
 
-// ResolveClientEntityRef accepts a networked entindex, a client-only raw
-// CBaseHandle::ToInt(), or a proper high-bit-marked client handle containing
-// both the entry index and serial.
+// ResolveClientEntityRef accepts a networked entindex or an opaque durable
+// token allocated by the manager. Tokens are negative (except invalid -1),
+// never reused, and validated against a separately stored full 32-bit handle.
+// Raw CBaseHandle::ToInt() values are not client refs; use the handle-address
+// conversion methods to read/write engine handles.
 
 namespace SourceMod
 {
@@ -20,6 +22,7 @@ public:
   // Client-only creation is immediate; seeding existing entities is silent.
   // Classname prefers the per-instance value received from the server, not a
   // direct server-entity lookup. Hold a proper handle ref across callbacks.
+  // Before decode, explicit classname queries can return a client fallback.
   virtual void OnClientEntityCreated(void *entity, int clientRef, const char *classname) {}
   virtual void OnClientEntityDestroyed(void *entity, int clientRef) {}
 };

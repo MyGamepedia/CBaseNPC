@@ -57,7 +57,7 @@ void IDataMapContainer::DestroyDataDescMap()
 	m_DataMapCache.Purge();
 
 	if (m_pDataMap->dataClassName)
-		delete m_pDataMap->dataClassName;
+		free(const_cast<char*>(m_pDataMap->dataClassName));
 	
 	delete[] m_pDataMap->dataDesc;
 	delete m_pDataMap;
@@ -294,6 +294,7 @@ bool IDataMapContainer::GetObjectData( void* obj, const char* prop, int &data, i
 			return true;
 		case FIELD_CHARACTER:
 			data = *((int8_t*)obj + offset);
+			return true;
 		case FIELD_BOOLEAN:
 			data = *(bool*)((int8_t*)obj + offset);
 			return true;

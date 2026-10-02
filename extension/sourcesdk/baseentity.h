@@ -193,6 +193,7 @@ public:
 	void DispatchUpdateTransmitState(void);
 
 	const char* GetClassname() const;
+	void SetClassname(const char* classname);
 	string_t GetStringClassname() const;
 
 	int GetSpawnFlags(void) const;

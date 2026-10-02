@@ -1,4 +1,5 @@
 #include "cbasenpcrecvtable.h"
+#include "cbasenpctablenames.h"
 #include "cbasenpcrecvproxy.h"
 #include "client/cliententitymanager.h"
 #include <algorithm>
@@ -106,7 +107,8 @@ bool CBaseNPCRecvTable::BuildField(size_t index, const typedescription_t& td,
      auto element = field; element.offset += i * size; element.elementCount = 1;
      Register(&props[i], element);
    }
-   std::unique_ptr<RecvTable> table(new RecvTable(props.get(), td.fieldSize, scalar.m_pVarName));
+   const auto arrayName = CBaseNPCArrayTableName(m_Table.GetName(), scalar.m_pVarName);
+   std::unique_ptr<RecvTable> table(new RecvTable(props.get(), td.fieldSize, CopyString(arrayName.c_str())));
    m_Props[index + 1] = DataTable(scalar.m_pVarName, table.get());
    Register(&m_Props[index + 1], field);
    m_ArrayProps.push_back(std::move(props)); m_ArrayTables.push_back(std::move(table));

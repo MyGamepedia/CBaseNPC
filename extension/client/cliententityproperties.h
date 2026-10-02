@@ -7,6 +7,8 @@
 #include <string>
 #include <unordered_map>
 struct CBaseNPCRecvField;
+// DPT_Int alone cannot distinguish an integer from an entity handle.
+bool CBaseNPC_IsEHandleRecvProp(const RecvProp* prop, RecvVarProxyFn stockProxy);
 
 struct ClientDataMapInfo
 {

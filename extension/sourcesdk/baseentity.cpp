@@ -277,6 +277,12 @@ void CBaseEntity::PostConstructor(const char* name)
 	NetworkStateChanged();
 }
 
+void CBaseEntity::SetClassname(const char* classname)
+{
+	*m_iClassname() = AllocPooledString(classname);
+	NetworkStateChanged();
+}
+
 void CBaseEntity::UpdateOnRemove(void)
 {
 	vUpdateOnRemove(this);

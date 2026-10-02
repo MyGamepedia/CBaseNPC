@@ -9,9 +9,10 @@
  *
  * These values are CLIENT references, not server CBaseEntity addresses.
  * Networked BCompat references are entindices (world 0 is valid); client-only
- * references contain a serialized client CBaseHandle. Invalid is -1, NOT 0.
- * Use GetHandleRef() for storage across frames: it includes the serial and
- * cannot resolve a new occupant after slot reuse. Do not test refs with > 0.
+ * references are opaque negative manager tokens. Invalid is -1, NOT 0.
+ * Use GetHandleRef() for storage across frames: its separately stored full
+ * handle/serial cannot resolve a new occupant after slot reuse. Do not test
+ * refs with > 0 or manipulate their bits. Raw CBaseHandle values are not refs.
  *
  * Address methods use SourceMod's real Address ABI, not CBaseEntity's
  * pseudo-address representation. Raw offsets/addresses must refer to valid
@@ -20,6 +21,8 @@
  * Prop_Data searches client datamaps; Prop_Send searches client RecvTables.
  * Writes affect local client memory only and may be overwritten by networking.
  * Get/SetPropEntity and Get/SetDataEntity use client refs; -1 clears a handle.
+ * Named Prop_Send entity access requires an EHANDLE proxy or custom EHandle
+ * metadata; ordinary integer fields (for example m_iHealth) are rejected.
  * Stock datamap string_t values use the CLIENT string pool. Dynamic network
  * strings use bounded sidecar char buffers, never client string_t values.
  */
@@ -85,6 +88,9 @@ methodmap CClientEntity
  * and is case-insensitive. Classnames prefer the replicated server classname,
  * then the client's IClientTools name, then C_BaseEntity. There is no direct
  * server-entity lookup, including on listen servers.
+ * Before receive decode, queries may return a cached/lazy client fallback.
+ * The server classname becomes authoritative when its property is received;
+ * networked OnEntityCreatedClient runs after the initial receive update.
  */
 methodmap CClientEntityManager
 {

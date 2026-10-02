@@ -4,6 +4,7 @@
 #include "shared/datamaplookup.h"
 #include "sourcesdk/cbasenpcclientlookup.h"
 #include "sourcesdk/cbasenpcrecvtable.h"
+#include "sourcesdk/cbasenpcrecvproxy.h"
 #include "sourcesdk/cbasenpcnetworkschema.h"
 
 #include <algorithm>
@@ -13,6 +14,14 @@
 #include <unordered_map>
 
 #include <mathlib/vector.h>
+
+bool CBaseNPC_IsEHandleRecvProp(const RecvProp* prop, RecvVarProxyFn stockProxy)
+{
+  if (!prop || prop->GetType() != DPT_Int) return false;
+  if (auto field = CBaseNPCRecvTable::FindField(prop))
+    return field->kind == CBaseNPCSendFieldKind::EHandle;
+  return stockProxy && prop->GetProxyFn() == stockProxy;
+}
 
 namespace
 {
@@ -883,9 +892,7 @@ cell_t Native_SetEntPropFloatClient(IPluginContext *context, const cell_t *param
 
 cell_t Native_GetEntPropEntClient(IPluginContext *context, const cell_t *params)
 {
-  // Preserve SourceMod's stock Prop_Send behavior: any integer RecvProp may
-  // carry an encoded handle. Only custom sidecar fields have explicit kind
-  // metadata and are therefore required to be declared as EHandle.
+  // Validate handle semantics before interpreting any stock integer storage.
   CBaseNPCClientEntityAccess access;
   if (!ResolvePropertyAccess(context, params[1], &access))
     return -1;
@@ -925,6 +932,8 @@ cell_t Native_GetEntPropEntClient(IPluginContext *context, const cell_t *params)
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Int, "entity handle", &resolved))
       return -1;
+    if (!CBaseNPC_IsEHandleRecvProp(resolved.prop, g_CBaseNPCRecvProxy.GetEHandleProxy()))
+      return context->ThrowNativeError("RecvProp %s is not an EHANDLE", name);
     return g_ClientEntityManager.ClientHandleToEntityRef(base + resolved.offset);
   }
   return context->ThrowNativeError("Invalid Property type %d", params[2]);
@@ -932,8 +941,6 @@ cell_t Native_GetEntPropEntClient(IPluginContext *context, const cell_t *params)
 
 cell_t Native_SetEntPropEntClient(IPluginContext *context, const cell_t *params)
 {
-  // The stock integer ambiguity is intentional here too; custom sidecars are
-  // strict because their schema records an explicit field kind.
   CBaseNPCClientEntityAccess access;
   if (!ResolvePropertyAccess(context, params[1], &access))
     return 0;
@@ -988,6 +995,8 @@ cell_t Native_SetEntPropEntClient(IPluginContext *context, const cell_t *params)
     ResolvedRecvProp resolved;
     if (!ResolveRecvElement(context, name, info, element, DPT_Int, "entity handle", &resolved))
       return 0;
+    if (!CBaseNPC_IsEHandleRecvProp(resolved.prop, g_CBaseNPCRecvProxy.GetEHandleProxy()))
+      return context->ThrowNativeError("RecvProp %s is not an EHANDLE", name);
     if (!g_ClientEntityManager.EntityRefToClientHandle(otherRef, base + resolved.offset))
       return context->ThrowNativeError("Client entity reference 0x%08X is invalid", otherRef);
     return 1;

@@ -1,6 +1,7 @@
 // Construction semantics adapted from the Source SDK public/dt_send.cpp.
 // Deliberately does not define a second standard SendProxy registry.
 #include "cbasenpcsendtable.h"
+#include "cbasenpctablenames.h"
 #include "cbasenpcsendproxy.h"
 #include <const.h>
 #include <string_t.h>
@@ -293,7 +294,8 @@ bool CBaseNPCSendTable::BuildField(size_t index, const typedescription_t& td,
 		props[i].m_pParentArrayPropName = scalar.m_pVarName;
 		props[i].SetOffset(i * stride);
 	}
-	std::unique_ptr<SendTable> table(new SendTable(props.get(), td.fieldSize, scalar.m_pVarName));
+	const auto arrayName = CBaseNPCArrayTableName(m_Table.GetName(), scalar.m_pVarName);
+	std::unique_ptr<SendTable> table(new SendTable(props.get(), td.fieldSize, CopyString(arrayName.c_str())));
 	SendProp outer = MakeDataTable(scalar.m_pVarName, offset, table.get(), false);
 	outer.SetArrayProp(element.get());
 	m_Props[index + 1] = outer;

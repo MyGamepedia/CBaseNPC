@@ -1,4 +1,5 @@
 #include "cbasenpcserverclass.h"
+#include "cbasenpctablenames.h"
 #include "cbasenpcnetworkschema.h"
 #include "cbasenpcsendtable.h"
 #include "cbasenpcsendproxy.h"
@@ -97,10 +98,10 @@ size_t CountProps(SendTable* table, std::set<SendTable*>& path)
 }
 
 void CollectTableNames(SendTable* table, std::set<SendTable*>& visited,
-	std::set<std::string, CaseInsensitiveCompare>& names)
+	std::map<std::string, SendTable*, CaseInsensitiveCompare>& names)
 {
 	if (!table || !visited.insert(table).second) return;
-	if (table->GetName()) names.insert(table->GetName());
+	CBaseNPCRegisterTableName(table, names);
 	for (int i = 0; i < table->GetNumProps(); ++i)
 		if (table->GetProp(i)->GetType() == DPT_DataTable)
 			CollectTableNames(table->GetProp(i)->GetDataTable(), visited, names);
@@ -255,7 +256,8 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 	try
 	{
 		std::map<std::string, CPluginEntityFactory*, CaseInsensitiveCompare> declarations;
-		std::set<std::string, CaseInsensitiveCompare> classNames, tableNames;
+		std::set<std::string, CaseInsensitiveCompare> classNames;
+		std::map<std::string, SendTable*, CaseInsensitiveCompare> tableNames;
 		std::set<SendTable*> stockTables;
 		for (auto sc : state.stock)
 		{
@@ -271,7 +273,7 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 			if (!factory->HasServerClassDeclaration()) continue;
 			if (!classNames.insert(factory->m_NetworkName).second)
 				throw std::runtime_error(factory->m_iClassname + ": duplicate ServerClass network name " + factory->m_NetworkName);
-			if (!tableNames.insert(factory->m_SendTableName).second)
+			if (!tableNames.emplace(factory->m_SendTableName, nullptr).second)
 				throw std::runtime_error(factory->m_iClassname + ": duplicate SendTable name " + factory->m_SendTableName);
 			declarations.emplace(factory->m_NetworkName, factory);
 		}

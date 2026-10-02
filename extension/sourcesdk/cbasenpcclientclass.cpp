@@ -1,4 +1,5 @@
 #include "cbasenpcclientclass.h"
+#include "cbasenpctablenames.h"
 #include "cbasenpcnetworkschema.h"
 #include "cbasenpcserverclass.h"
 #include "cbasenpcrecvproxy.h"
@@ -48,12 +49,12 @@ bool ContainsTable(RecvTable* table, RecvTable* target, std::set<RecvTable*>& se
  return false;
 }
 void ValidateTable(RecvTable* table, std::set<RecvTable*>& path, std::set<RecvTable*>& all,
- std::set<std::string, CaseInsensitiveCompare>& names)
+ std::map<std::string, RecvTable*, CaseInsensitiveCompare>& names)
 {
  if (!table || !table->GetName() || !*table->GetName() || !path.insert(table).second)
    throw std::runtime_error("invalid/cyclic RecvTable graph");
  if (path.size() > 64) throw std::runtime_error("RecvTable inheritance exceeds 64 levels");
- if (all.insert(table).second) names.insert(table->GetName());
+ if (all.insert(table).second) CBaseNPCRegisterTableName(table, names);
  if (all.size() > MAX_DATATABLES || table->GetNumProps() < 0 || table->GetNumProps() > MAX_DATATABLE_PROPS)
    throw std::runtime_error("RecvTable graph exceeds engine limits");
  for (int i = 0; i < table->GetNumProps(); ++i) {
@@ -172,12 +173,12 @@ bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxleng
      if (factory && factory->m_bInstalled && factory->HasServerClassDeclaration()) servers.emplace(factory->m_NetworkName, factory);
    }
    std::map<std::string, CPluginClientEntityFactory*, CaseInsensitiveCompare> declarations;
-   std::set<std::string, CaseInsensitiveCompare> tableNames;
+   std::map<std::string, RecvTable*, CaseInsensitiveCompare> tableNames;
    std::set<RecvTable*> all, path;
    for (auto cc : s.stock) ValidateTable(cc->m_pRecvTable, path, all, tableNames);
    for (auto factory : g_PluginClientEntityFactories.All()) {
      if (!factory->installed) continue;
-     if (FindStockOrCustomClass(factory->networkName.c_str()) || !declarations.emplace(factory->networkName, factory).second || !tableNames.insert(factory->tableName).second)
+     if (FindStockOrCustomClass(factory->networkName.c_str()) || !declarations.emplace(factory->networkName, factory).second || !tableNames.emplace(factory->tableName, nullptr).second)
        throw std::runtime_error("duplicate ClientClass/RecvTable declaration: " + factory->networkName);
      auto server = servers.find(factory->networkName);
      if (server == servers.end() || server->second->m_SendTableName != factory->tableName || server->second->m_BaseNetworkName != factory->networkBase || server->second->m_iClassname != factory->classname)
