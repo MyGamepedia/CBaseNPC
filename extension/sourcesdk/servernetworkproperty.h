@@ -40,6 +40,19 @@ public:
 	virtual int				AreaNum() const;
 	virtual PVSInfo_t* GetPVSInfo();
 
+	// Black Mesa x86 retail stores this existing cache at +0x30. Set it once
+	// before publishing a runtime entity to networking workers; never mutate it
+	// during the entity's lifetime. Inline accessors are ABI-neutral.
+	inline void SetCachedServerClass(ServerClass* pServerClass)
+	{
+		m_pServerClass = pServerClass;
+	}
+
+	inline ServerClass* GetCachedServerClass() const
+	{
+		return m_pServerClass;
+	}
+
 public:
 	// Other public methods
 	//void Init(CBaseEntity* pEntity);

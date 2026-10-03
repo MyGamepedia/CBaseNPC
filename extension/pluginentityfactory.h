@@ -4,6 +4,8 @@
 #include <vector>
 #include <memory>
 
+#include "pluginentityrecordkey.h"
+
 #include <itoolentity.h>
 #include <tier0/platform.h>
 #include <IEngineTrace.h>
@@ -11,6 +13,7 @@
 #include <util.h>
 
 #include "idatamapcontainer.h"
+#include "sourcesdk/cbasenpcsendtable.h"
 #include "helpers.h"
 #include "toolsnextbot.h"
 
@@ -47,7 +50,7 @@ public:
 	CBaseNPCPluginActionFactory* m_pInitialActionFactory = nullptr;
 	CBaseNPCIntention* m_pIntentionInterface = nullptr;
 
-	void Hook(bool bHookDestructor = true);
+	bool Hook(bool bHookDestructor = true);
 
 	PluginFactoryEntityRecord_t( CBaseEntity* pEnt ) : pEntity(pEnt) { }
 	~PluginFactoryEntityRecord_t();
@@ -118,6 +121,8 @@ public:
 
 private:
 	friend class CustomFactory;
+	friend class CBaseNPCServerClassManager;
+	friend class CBaseNPCClientClassManager;
 	void InstallGameFactory(const char* classname, IEntityFactory* factory);
 	void RemoveGameFactory(IEntityFactory* factory);
 
@@ -128,7 +133,7 @@ private:
 
 	size_t m_BaseClassSizes[ FACTORYBASECLASS_MAX ];
 	CUtlVector< CPluginEntityFactory* > m_Factories;
-	std::map<cell_t, std::unique_ptr<PluginFactoryEntityRecord_t>> m_Records;
+	std::map<PluginEntityRecordKey, std::unique_ptr<PluginFactoryEntityRecord_t>> m_Records;
 	std::map<std::string, IEntityFactory*, CaseInsensitiveCompare> m_gameFactories; 
 	std::map<std::string, CPluginEntityFactory*, CaseInsensitiveCompare> m_pluginFactories;
 	std::vector<int> m_hookIds;
@@ -138,6 +143,27 @@ extern CPluginEntityFactories* g_pPluginEntityFactories;
 
 class CPluginEntityFactory : public IEntityFactory, public IEntityDataMapContainer
 {    
+private:
+	std::string m_NetworkName, m_SendTableName, m_BaseNetworkName;
+	std::vector<CBaseNPCSendFieldDesc> m_SendFields;
+	ServerClass* m_pServerClass = nullptr; // Owned by the network manager.
+	bool m_bNetworkLayoutFrozen = false;
+	bool m_bDefiningDataDesc = false;
+	size_t m_FinalNetworkEntitySize = 0;
+
+public:
+	bool DefineServerClass(const char* networkName, const char* tableName, const char* baseName, std::string& error);
+	bool HasServerClassDeclaration() const { return !m_NetworkName.empty(); }
+	ServerClass* GetServerClass() const { return m_pServerClass; }
+	ServerClass* GetEffectiveServerClass() const;
+	bool HasNetworkDefinition() const;
+	bool IsNetworkLayoutFrozen() const { return m_bNetworkLayoutFrozen; }
+	void AddSendField(const CBaseNPCSendFieldDesc& desc) { m_SendFields.push_back(desc); }
+	bool IsDefiningDataDesc() const { return m_bDefiningDataDesc; }
+	void EndDataDesc() override;
+	friend class CBaseNPCServerClassManager;
+	friend class CBaseNPCClientClassManager;
+
 public:
 	std::string m_iClassname;
 	IPlugin* m_pPlugin;

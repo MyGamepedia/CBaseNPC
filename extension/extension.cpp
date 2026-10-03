@@ -3,6 +3,14 @@
 #include "extension.h"
 #include <CDetour/detours.h>
 #include "helpers.h"
+#include "sourcesdk/cbasenpcsendproxy.h"
+#include "sourcesdk/cbasenpcserverclass.h"
+#include "sourcesdk/cbasenpcnetworkschema.h"
+#if SOURCE_ENGINE == SE_BMS
+#include "client/cliententitymanager.h"
+#include "sourcesdk/cbasenpcrecvproxy.h"
+#include "sourcesdk/cbasenpcclientclass.h"
+#endif
 #include "sourcesdk/nav_mesh.h"
 #if SOURCE_ENGINE == SE_TF2  
 #include "sourcesdk/tf_gamerules.h"  
@@ -45,7 +53,7 @@ IMDLCache* mdlcache = nullptr;
 CSharedEdictChangeInfo* g_pSharedChangeInfo = nullptr;
 IStaticPropMgrServer* staticpropmgr = nullptr;
 ConVar* sourcemod_version = nullptr;
-IBaseNPC_Tools* g_pBaseNPCTools = new BaseNPC_Tools_API;
+ICBaseNPCTools* g_pCBaseNPCTools = new BaseNPC_Tools_API;
 std::vector<sp_nativeinfo_t> gNatives;
 
 DEFINEHANDLEOBJ(AreasCollector, CUtlVector< CNavArea* >);
@@ -93,6 +101,10 @@ enum CBaseNPCDataMapIndex : size_t
 }
 
 bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
+	if (g_CBaseNPCNetworkSchemaManager.IsPublished()) {
+		snprintf(error, maxlength, "CBaseNPC schema is already published in this process; PROCESS RESTART REQUIRED");
+		return false;
+	}
 	char conf_error[255];
 	if (!gameconfs->LoadGameConfigFile("cbasenpc", &g_pGameConf, conf_error, sizeof(conf_error))) {
 		snprintf(error, maxlength, "FAILED TO LOAD GAMEDATA ERROR: %s", conf_error);
@@ -101,7 +113,63 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 
 	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 
+	int iOffset = 0;
+	GETGAMEDATAOFFSET("CBaseEntity::Event_Killed", iOffset);
+	SH_MANUALHOOK_RECONFIGURE(MEvent_Killed, iOffset, 0, 0);
+
+	if (!g_CBaseNPCSendProxy.Init(error, maxlength))
+	{
+		return false;
+	}
+
 	bool bEdictSlotsAreNotAvailable = engine->GetEntityCount() < 1;
+#if SOURCE_ENGINE == SE_BMS
+	if (!g_ClientEntityManager.Initialize(g_pGameConf, error, maxlength) ||
+		(g_ClientEntityManager.IsAvailable() && !g_CBaseNPCRecvProxy.Init(error, maxlength)))
+	{
+		g_CBaseNPCRecvProxy.Shutdown();
+		g_ClientEntityManager.Shutdown();
+		g_CBaseNPCSendProxy.Shutdown();
+		return false;
+	}
+#endif
+
+	// SDK_OnUnload is not guaranteed after failed SDK_OnLoad. Roll back the
+	// client subsystem on every subsequent failure path as well.
+	bool loadSucceeded = false;
+	auto cleanupClient = [&loadSucceeded](void*)
+	{
+#if SOURCE_ENGINE == SE_BMS
+		if (!loadSucceeded)
+		{
+			g_PluginClientEntityFactories.Shutdown();
+			g_CBaseNPCClientClassManager.Shutdown();
+			g_CBaseNPCRecvProxy.Shutdown();
+			g_ClientEntityManager.Shutdown();
+		}
+#endif
+	};
+	std::unique_ptr<void, decltype(cleanupClient)> clientLoadGuard(this, cleanupClient);
+
+	if (!g_CBaseNPCServerClassManager.Init(g_pGameConf, error, maxlength))
+	{
+		g_CBaseNPCSendProxy.Shutdown();
+		return false;
+	}
+#if SOURCE_ENGINE == SE_BMS
+	if (!g_CBaseNPCClientClassManager.Init(g_pGameConf, error, maxlength) ||
+		!g_PluginClientEntityFactories.Init(error, maxlength)) {
+		g_CBaseNPCServerClassManager.Shutdown();
+		g_CBaseNPCSendProxy.Shutdown();
+		return false;
+	}
+#endif
+	bool existingNetworkEntities = engine->GetEntityCount() > 0;
+#if SOURCE_ENGINE == SE_BMS
+	existingNetworkEntities = existingNetworkEntities ||
+		(g_ClientEntityManager.IsAvailable() && g_ClientEntityManager.GetClientEntityCount() > 0);
+#endif
+	g_CBaseNPCNetworkSchemaManager.ConfigureLoad(late, existingNetworkEntities);
 
 	if (bEdictSlotsAreNotAvailable) //we loaded early - can't create edicts to get datamaps from their methods, try to scan memory for datamaps instead
 	{
@@ -122,6 +190,8 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 		{
 			if (!Initialize(error, maxlength, dataMaps)) //still didn't initialize smh
 			{
+				g_CBaseNPCSendProxy.Shutdown();
+				g_CBaseNPCServerClassManager.Shutdown();
 				return false;
 			}
 
@@ -136,14 +206,12 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	else if (!Initialize(error, maxlength)) //we can create edicts but didn't initialized
 	{
 		g_pSM->LogMessage(myself, "CBaseNPC failed to initialize using edicts!");
+		g_CBaseNPCServerClassManager.Shutdown();
+		g_CBaseNPCSendProxy.Shutdown();
 		return false;
 	}
 
 	g_pForwardEventKilled = forwards->CreateForward("CBaseCombatCharacter_EventKilled", ET_Event, 9, nullptr, Param_Cell, Param_CellByRef, Param_CellByRef, Param_FloatByRef, Param_CellByRef, Param_CellByRef, Param_Array, Param_Array, Param_Cell);
-
-	int iOffset = 0;
-	GETGAMEDATAOFFSET("CBaseEntity::Event_Killed", iOffset);
-	SH_MANUALHOOK_RECONFIGURE(MEvent_Killed, iOffset, 0, 0);
 
 	CREATEHANDLETYPE(AreasCollector);
 
@@ -151,7 +219,10 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	sharesys->AddDependency(myself, "sdktools.ext", true, true);
 	sharesys->AddDependency(myself, "sdkhooks.ext", true, true);
 	sharesys->RegisterLibrary(myself, "cbasenpc");
-	sharesys->AddInterface(myself, g_pBaseNPCTools);
+	sharesys->AddInterface(myself, g_pCBaseNPCTools);
+#if SOURCE_ENGINE == SE_BMS
+	sharesys->AddInterface(myself, &g_ClientEntityManager);
+#endif
 	
 	gNatives.reserve(1000);
 	natives::setup(gNatives);
@@ -172,6 +243,7 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 		m_iLevelInitHookID = SH_ADD_HOOK(IServerGameDLL, LevelInit, gamedll, SH_MEMBER(this, &CBaseNPCExt::Hook_LevelInit), false);
 	}
 
+	loadSucceeded = true;
 	return true;
 }
 
@@ -219,6 +291,9 @@ void CBaseNPCExt::OnCoreMapStart(edict_t* edictlist, int edictCount, int clientM
 }
 
 void CBaseNPCExt::OnCoreMapEnd() {
+#if SOURCE_ENGINE == SE_BMS
+	g_ClientEntityManager.PurgeEntities();
+#endif
 	g_pBaseNPCPluginActionFactories->OnCoreMapEnd();
 	g_pPluginEntityFactories->OnCoreMapEnd();
 	CNavMesh::OnCoreMapEnd();
@@ -232,7 +307,7 @@ void CBaseNPCExt::OnEntityDestroyed(CBaseEntity* pEntity) {
 		return;
 	}
 
-	g_pBaseNPCTools->DeleteNPCByEntIndex(gamehelpers->EntityToBCompatRef(pEntity));
+	g_pCBaseNPCTools->DeleteNPCByEntIndex(gamehelpers->EntityToBCompatRef(pEntity));
 
 	auto iIndex = g_EntitiesHooks.Find(gamehelpers->EntityToReference(pEntity));
 	if (g_EntitiesHooks.IsValidIndex(iIndex)) {
@@ -279,6 +354,17 @@ void CBaseNPCExt::SDK_OnAllLoaded() {
 	g_pEntityList = (CBaseEntityList *)gamehelpers->GetGlobalEntityList();
 }
 
+void CBaseNPCExt::SDK_OnAllPluginsLoaded()
+{
+	char error[512];
+	if (!g_CBaseNPCNetworkSchemaManager.Finalize(error, sizeof(error)))
+	{
+		g_pSM->LogError(myself, "Failed to finalize CBaseNPC network classes: %s", error);
+		if (g_CBaseNPCNetworkSchemaManager.IsPublished())
+			Error("CBaseNPC network initialization failed after publication: %s", error);
+	}
+}
+
 bool CBaseNPCExt::QueryRunning(char* error, size_t maxlength) {
 	SM_CHECK_IFACE(BINTOOLS, g_pBinTools);
 	SM_GET_LATE_IFACE(SDKHOOKS, g_pSDKHooks);
@@ -312,11 +398,33 @@ void CBaseNPCExt::NotifyInterfaceDrop(SMInterface* interface) {
 
 void CBaseNPCExt::SDK_OnUnload()
 {
+	if (g_CBaseNPCNetworkSchemaManager.IsPublished()) {
+		// IExtensionInterface has no unload veto. Do not invalidate the engine's
+		// schema/proxy/thunk pointers or revert its public lists during teardown.
+		// Retaining the code module prevents dangling function pointers, but does
+		// not make SourceHook registrations or a hot reload safe.
+		g_pSM->LogError(myself, "CBaseNPC unload after network publication is unsupported and leaves the process unsafe. PROCESS RESTART REQUIRED immediately; do not continue playing or reload the extension.");
+		g_CBaseNPCNetworkSchemaManager.StopAfterUnload();
+#if SOURCE_ENGINE == SE_BMS
+		g_PluginClientEntityFactories.Shutdown();
+		g_ClientEntityManager.DetachPluginConsumers();
+#endif
+		return;
+	}
+#if SOURCE_ENGINE == SE_BMS
+	g_PluginClientEntityFactories.Shutdown();
+	g_CBaseNPCClientClassManager.Shutdown();
+	g_CBaseNPCRecvProxy.Shutdown();
+	g_ClientEntityManager.Shutdown();
+#endif
+	g_CBaseNPCServerClassManager.Shutdown();
 	if (m_iLevelInitHookID != 0)
 	{
 		SH_REMOVE_HOOK_ID(m_iLevelInitHookID);
 		m_iLevelInitHookID = 0;
 	}
+
+	g_CBaseNPCSendProxy.Shutdown();
 
 	if (m_bInitialized)
 	{

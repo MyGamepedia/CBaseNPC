@@ -248,3 +248,60 @@ public Extension __ext_cbasenpc =
 	required = 0,
 #endif
 };
+#if defined CBASENPC_BLACKMESA
+#include <cbasenpc/bms/cliententity>
+#include <cbasenpc/bms/entityfactoryclient>
+#endif
+
+#if !defined REQUIRE_EXTENSIONS && defined CBASENPC_BLACKMESA
+public void __ext_cbasenpc_SetNTVOptional()
+{
+  MarkNativeAsOptional("CClientEntity.GetAddress");
+  MarkNativeAsOptional("CClientEntity.GetRuntimeDiagnostics");
+  MarkNativeAsOptional("CEntityFactoryClient.CEntityFactoryClient");
+  MarkNativeAsOptional("CEntityFactoryClient.DefineClientClass");
+  MarkNativeAsOptional("CEntityFactoryClient.DeriveFromNetworkClass");
+  MarkNativeAsOptional("CEntityFactoryClient.Install");
+  MarkNativeAsOptional("CClientEntityManager.FromAddress");
+  MarkNativeAsOptional("CClientEntityManager.GetCount");
+  MarkNativeAsOptional("CClientEntityManager.GetByOrdinal");
+  MarkNativeAsOptional("CClientEntityManager.FromHandleAddress");
+  MarkNativeAsOptional("CClientEntity.IsValid");
+  MarkNativeAsOptional("CClientEntityManager.FromEntIndex");
+  MarkNativeAsOptional("CClientEntity.GetEntIndex");
+  MarkNativeAsOptional("CClientEntity.GetClassname");
+  MarkNativeAsOptional("CClientEntity.GetClassnameDiagnostics");
+  MarkNativeAsOptional("CClientEntityManager.FindByClassname");
+  MarkNativeAsOptional("CClientEntity.StoreHandle");
+  MarkNativeAsOptional("CClientEntity.GetNetworkClass");
+  MarkNativeAsOptional("CClientEntity.IsNetworkable");
+  MarkNativeAsOptional("CClientEntity.Remove");
+  MarkNativeAsOptional("CClientEntity.GetRecvPropOffset");
+  MarkNativeAsOptional("CClientEntity.GetData");
+  MarkNativeAsOptional("CClientEntity.GetDataEntity");
+  MarkNativeAsOptional("CClientEntity.GetDataFloat");
+  MarkNativeAsOptional("CClientEntity.GetDataString");
+  MarkNativeAsOptional("CClientEntity.GetDataVector");
+  MarkNativeAsOptional("CClientEntity.GetProp");
+  MarkNativeAsOptional("CClientEntity.GetPropArraySize");
+  MarkNativeAsOptional("CClientEntity.GetPropEntity");
+  MarkNativeAsOptional("CClientEntity.GetPropFloat");
+  MarkNativeAsOptional("CClientEntity.GetPropString");
+  MarkNativeAsOptional("CClientEntity.GetPropVector");
+  MarkNativeAsOptional("CClientEntity.SetData");
+  MarkNativeAsOptional("CClientEntity.SetDataEntity");
+  MarkNativeAsOptional("CClientEntity.SetDataFloat");
+  MarkNativeAsOptional("CClientEntity.SetDataString");
+  MarkNativeAsOptional("CClientEntity.SetDataVector");
+  MarkNativeAsOptional("CClientEntity.SetProp");
+  MarkNativeAsOptional("CClientEntity.SetPropEntity");
+  MarkNativeAsOptional("CClientEntity.SetPropFloat");
+  MarkNativeAsOptional("CClientEntity.SetPropString");
+  MarkNativeAsOptional("CClientEntity.SetPropVector");
+  MarkNativeAsOptional("CClientEntity.GetDataArray");
+  MarkNativeAsOptional("CClientEntity.HasProp");
+  MarkNativeAsOptional("CClientEntity.SetDataArray");
+  MarkNativeAsOptional("CClientEntityManager.IsAvailable");
+  MarkNativeAsOptional("CClientEntity.GetHandleRef");
+}
+#endif

@@ -3,6 +3,27 @@
 #endif
 #define _CBASENPC_ENTITYFACTORY_INC_
 
+#define CBASENPC_SENDPROP_HIGH_DEFAULT -121121.121121
+#define CBASENPC_SENDPROP_MAX_STRING_LENGTH 512
+
+// BMS dt_common.h user-facing flags. Internal table/array flags are not exposed.
+enum
+{
+	CBaseNPCSendProp_None = 0,
+	CBaseNPCSendProp_Unsigned = (1 << 0),
+	CBaseNPCSendProp_Coord = (1 << 1),
+	CBaseNPCSendProp_NoScale = (1 << 2),
+	CBaseNPCSendProp_RoundDown = (1 << 3),
+	CBaseNPCSendProp_RoundUp = (1 << 4),
+	CBaseNPCSendProp_Normal = (1 << 5),
+	CBaseNPCSendProp_VarInt = (1 << 5),
+	CBaseNPCSendProp_XYZE = (1 << 7),
+	CBaseNPCSendProp_ChangesOften = (1 << 10),
+	CBaseNPCSendProp_CoordMP = (1 << 13),
+	CBaseNPCSendProp_CoordMPLowPrecision = (1 << 14),
+	CBaseNPCSendProp_CoordMPIntegral = (1 << 15)
+};
+
 typeset InputFuncCallback
 {
 	// Void
@@ -248,6 +269,44 @@ methodmap CEntityFactory < Handle
 	// Datamap
 
 	/**
+	 * Declares a server-side network identity, independent of the entity classname.
+	 * The base is a stock OR custom ServerClass network name, not an entity classname
+	 * or DT_ name. No temporary entity is constructed to infer the base.
+	 * May be called before/after fields, in initial OnPluginStart/OnAllPluginsLoaded.
+	 * Zero custom SendProps is valid. All send=true fields require a declaration.
+	 * A custom base containing fields must also be an allocation ancestor (via
+	 * DeriveFromFactory/DeriveFromClass). Choose a stock base compatible with the
+	 * actual entity's C++ memory layout; network inheritance cannot add C++ fields.
+	 * Tables are finalized once AFTER every plugin's OnAllPluginsLoaded returns.
+	 * Creating network entities before that boundary fails. Late registration and
+	 * changing a finalized layout require a process restart. Plugin removal leaves
+	 * the schema alive; runtime extension unload/reload is unsupported.
+	 * This is BMS server-side only: a matching client ClientClass/RecvTable is still
+	 * required for clients to use these entities.
+	 * @return This factory, for chaining.
+	 */
+	public native CEntityFactory DefineServerClass(const char[] sNetworkName, const char[] sSendTableName, const char[] sBaseNetworkName);
+
+	// SendProp options shared by Define*Field below:
+	// bIsSendProp=false preserves the original datamap-only behavior.
+	// true uses the SAME memory/offset as the datamap, without extra storage.
+	// iSendBits=-1/0 selects full storage width for integers, full resolution for
+	// floats; positive bits are 1..32, per component for vectors/angles.
+	// iSendFlags is a combination of CBaseNPCSendProp_* values valid for the type.
+	// Coord/CoordMP*/NoScale/Normal/XYZE are mutually exclusive modes. Normal and
+	// XYZE apply to full Vector only; rounding applies to quantized Float/Vector.
+	// Bool, Color, EHandle, Time and ModelIndex accept only ChangesOften.
+	// Float/Vector ranges use flSendLow/flSendHigh; HIGH_DEFAULT selects 2^bits.
+	// Counts > 1 produce fixed Array3-style nested datatables (up to 2048 elements).
+	// Character arrays are integer arrays, NOT strings. String fields are string_t.
+	// iSendMaxLength validates SDK SendPropString's bufferLen (1..512); it is not
+	// a per-property runtime truncation limit in Source's SendProp layout.
+	// Direct datamap writes need the existing CBaseEntity.NetworkStateChanged()
+	// mechanism after initialization. For string_t, prefer Prop_Data setters plus
+	// notification: SourceMod's Prop_Send setter guesses storage from proxy output,
+	// which is not reliable for initially NULL_STRING fields across DLL boundaries.
+
+	/**
 	 * Begin defining the datamap structure. The factory uses this datamap to
 	 * create and map out custom, user-defined properties on the entity. These 
 	 * properties can be accessed using Get/SetEntProp. Use EndDataMapDesc()
@@ -284,7 +343,7 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle, or tried to declare key field as
 	 *                        array.
 	 */
-	public native CEntityFactory DefineIntField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING);
+	public native CEntityFactory DefineIntField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=-1, int iSendFlags=0);
 
 	/**
 	 * Defines a float field in the datamap.
@@ -297,7 +356,7 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle, or tried to declare key field as
 	 *                        array.
 	 */
-	public native CEntityFactory DefineFloatField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING);
+	public native CEntityFactory DefineFloatField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=32, int iSendFlags=0, float flSendLow=0.0, float flSendHigh=CBASENPC_SENDPROP_HIGH_DEFAULT);
 
 	/**
 	 * Defines a character field in the datamap.
@@ -310,7 +369,7 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle, or tried to declare key field as
 	 *                        array.
 	 */
-	public native CEntityFactory DefineCharField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING);
+	public native CEntityFactory DefineCharField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=-1, int iSendFlags=0);
 
 	/**
 	 * Defines a boolean field in the datamap.
@@ -323,7 +382,7 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle, or tried to declare key field as
 	 *                        array.
 	 */
-	public native CEntityFactory DefineBoolField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING);
+	public native CEntityFactory DefineBoolField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendFlags=0);
 
 	/**
 	 * Defines a Vector field in the datamap.
@@ -336,7 +395,7 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle, or tried to declare key field as
 	 *                        array.
 	 */
-	public native CEntityFactory DefineVectorField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING);
+	public native CEntityFactory DefineVectorField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=32, int iSendFlags=CBaseNPCSendProp_NoScale, float flSendLow=0.0, float flSendHigh=CBASENPC_SENDPROP_HIGH_DEFAULT);
 
 	/**
 	 * Defines a string field in the datamap.
@@ -349,7 +408,7 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle, or tried to declare key field as
 	 *                        array.
 	 */
-	public native CEntityFactory DefineStringField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING);
+	public native CEntityFactory DefineStringField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendMaxLength=CBASENPC_SENDPROP_MAX_STRING_LENGTH, int iSendFlags=0);
 
 	/**
 	 * Defines a color field in the datamap.
@@ -362,7 +421,7 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle, or tried to declare key field as
 	 *                        array.
 	 */
-	public native CEntityFactory DefineColorField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING);
+	public native CEntityFactory DefineColorField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendFlags=0);
 
 	/**
 	 * Defines an entity field in the datamap.
@@ -373,7 +432,7 @@ methodmap CEntityFactory < Handle
 	 * @return                The CEntityFactory to chain calls
 	 * @error                 Invalid handle.
 	 */
-	public native CEntityFactory DefineEntityField(const char[] sFieldName, int iNumElements=1);
+	public native CEntityFactory DefineEntityField(const char[] sFieldName, int iNumElements=1, bool bIsSendProp=false, int iSendFlags=0);
 
 	/**
 	 * Defines an input function. Inputs can be invoked using AcceptEntityInput,
@@ -389,6 +448,19 @@ methodmap CEntityFactory < Handle
 	 * @error                 Invalid handle.
 	 */
 	public native CEntityFactory DefineInputFunc(const char[] sInputName, InputFuncValueType valueType, InputFuncCallback handler);
+
+	/** Signed/unsigned 16-bit storage; transmitted as an integer. */
+	public native CEntityFactory DefineShortField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=-1, int iSendFlags=0);
+	/** Three-float storage, only X/Y transmitted. */
+	public native CEntityFactory DefineVectorXYField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=32, int iSendFlags=CBaseNPCSendProp_NoScale, float flSendLow=0.0, float flSendHigh=CBASENPC_SENDPROP_HIGH_DEFAULT);
+	/** FIELD_TIME, transmitted as a generic unscaled float, not simulation time. */
+	public native CEntityFactory DefineTimeField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendFlags=0);
+	/** Float angle, normalized to 0..360 for transmission. */
+	public native CEntityFactory DefineAngleField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=32, int iSendFlags=0);
+	/** Three normalized angles in FIELD_VECTOR storage. */
+	public native CEntityFactory DefineQAngleField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendBits=32, int iSendFlags=0);
+	/** FIELD_MODELINDEX, engine-defined network bit width. */
+	public native CEntityFactory DefineModelIndexField(const char[] sFieldName, int iNumElements=1, const char[] sKeyName=NULL_STRING, bool bIsSendProp=false, int iSendFlags=0);
 
 	/**
 	 * Defines an output. Outputs can be fired using FireEntityOutput.

@@ -3,7 +3,7 @@
 
 #include <ehandle.h>
 #include <ai_activity.h>
-#include "npctools.h"
+#include "ICBaseNPCTools.h"
 
 #include "sourcesdk/NextBot/NextBotInterface.h"
 #include "sourcesdk/NextBot/NextBotLocomotionInterface.h"
@@ -19,7 +19,7 @@ class CExtNPC
 {
 public:
 	CExtNPC() : m_iIndex(INVALID_NPC_ID), m_hEntity(nullptr) {};
-	virtual ~CExtNPC() { g_pBaseNPCTools->DeleteNPC(this); };
+	virtual ~CExtNPC() { g_pCBaseNPCTools->DeleteNPC(this); };
 
 	inline int GetID()
 	{
@@ -33,7 +33,7 @@ public:
 
 	void SetEntity(CBaseEntity* ent)
 	{
-		m_iIndex = g_pBaseNPCTools->GrantID(ent, this);
+		m_iIndex = g_pCBaseNPCTools->GrantID(ent, this);
 		m_hEntity = ent;
 	};
 

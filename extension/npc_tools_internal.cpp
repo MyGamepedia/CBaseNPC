@@ -9,11 +9,11 @@ CExtNPC* g_objNPC[MAX_NPCS];
 CExtNPC* g_objNPC2[2049];
 
 const char* BaseNPC_Tools_API::GetInterfaceName() {
-	return SMINTERFACE_NPCTOOLS_NAME;
+	return SMINTERFACE_CBASENPC_TOOLS_NAME;
 }
 
 unsigned int BaseNPC_Tools_API::GetInterfaceVersion() {
-	return SMINTERFACE_NPCTOOLS_VERSION;
+	return SMINTERFACE_CBASENPC_TOOLS_VERSION;
 }
 
 int BaseNPC_Tools_API::GrantID(CBaseEntity* ent, CExtNPC* npc) {

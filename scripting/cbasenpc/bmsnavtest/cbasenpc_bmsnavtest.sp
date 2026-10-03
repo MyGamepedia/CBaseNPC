@@ -1,4 +1,4 @@
-//test this on dm_crossfire, it has proper nav mesh (you may need to launch with mp_coop 1)
+//test this on dm_crossfire, it has proper nav mesh (you may need to launch with mp_coop 1) 
   
 #include <sourcemod>  
 #include <cbasenpc>  

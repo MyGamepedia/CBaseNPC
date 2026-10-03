@@ -4,6 +4,7 @@
 	{
 		"Offsets"
 		{
+
 			// Locate CBaseEntity::PhysicsMarkEntitiesAsTouching, first dword is g_TouchTrace
 			"g_TouchTrace"
 			{
@@ -152,6 +153,7 @@
 		}
 		"Signatures"
 		{
+
 			// Find string "Missing command string" which is used by nb_command
 			// nb_command calls TheNextBots()
 			"TheNextBots"
@@ -391,6 +393,29 @@
 	{
 		"Offsets"
 		{
+			// Offset from the IClientEntityList* returned by VClientEntityList003
+			// to CClientEntityList::m_entityListeners.
+			// Verified against 32-bit Windows client.dll:
+			// SHA-256 D7EB73753306D0148BE3B41E0490EAF989E3882D4A113E27E41DBAA0797B36DF
+			"ClientEntityListeners"
+			{
+				"windows"  "4"
+			}
+
+			// Zero-based slot in the primary C_BaseEntity vtable.
+			// Primary vtable: 0x10421E9C, implementation: 0x100A9FE0.
+			"C_BaseEntity::GetDataDescMap"
+			{
+				"windows"  "13"
+			}
+
+			// Zero-based slot in the primary C_BaseEntity vtable.
+			// Implementation: 0x100AEEE0, found from the diagnostic string
+			// "SUB_Remove called on entity with health > 0\n".
+			"C_BaseEntity::SUB_Remove"
+			{
+				"windows"  "120"
+			}
 			// Locate CBaseEntity::PhysicsMarkEntitiesAsTouching, first dword is g_TouchTrace
 			"g_TouchTrace"
 			{
@@ -552,9 +577,27 @@
 				"linux"		"111"
 				"windows"	"110"
 			}
+			"C_BaseEntity::InitializeAsClientEntity"
+			{
+				"windows"		"86"
+			}
 		}
 		"Signatures"
 		{
+			// string_t AllocPooledString(const char *), client.dll implementation
+			// 0x1014D450 in the verified Windows binary. This must use the client
+			// CGameStringPool; the server-side SourceMod helper is a different pool.
+			//how to find:
+			//find "UpdatePlayerName with bogus slot %d\n" xref,
+			//it has two funcs, the one you need is the only func with two params,
+			//it is C_PlayerResource::UpdatePlayerName, 
+			//it calls a func by putting "unconnected" string as param,
+			//the func is client side AllocPooledString you need
+			"AllocPooledStringClient"
+			{
+				"library"  "client"
+				"windows"  "\x55\x8B\xEC\x8B\x45\x08\x85\xC0\x74\x2A\x80\x38\x00\x74\x2A\x50\xB9\x2A\x2A\x2A\x2A\xE8\x2A\x2A\x2A\x2A\x5D\xC3\x33\xC0\x5D\xC3"
+			}
 			// Find string "Missing command string" which is used by nb_command
 			// nb_command calls TheNextBots()
 			"TheNextBots"
@@ -740,19 +783,94 @@
 			}
 			"g_TouchTrace"  
 			{  
-				"library"   "server"  
-				"linux"     "@g_TouchTrace"  
+				"library"   	"server"  
+				"linux"     	"@g_TouchTrace"  
 			}
 			"TheNavMesh_Linux"
 			{
-				"library"	"server"
-				"linux"		"@TheNavMesh"
+				"library"		"server"
+				"linux"			"@TheNavMesh"
 			}
 
 			"TheNavAreas_Linux"
 			{
-				"library"	"server"
-				"linux"		"@TheNavAreas"
+				"library"		"server"
+				"linux"			"@TheNavAreas"
+			}
+			
+			//how to find: find by string ''SendTable_Init: called twice.''
+			"SendTable_Init"
+			{
+				"library"		"engine"
+				"windows"		"\x55\x8B\xEC\x51\x83\x3D\x2A\x2A\x2A\x2A\x00\x0F\x85\x2A\x2A\x2A\x2A\x53\x8B\x5D\x0C\x56\x57\x33\xFF\x85\xDB"
+				"linux"			"@_Z14SendTable_InitPP9SendTablei"
+			}
+			
+			//how to find: 
+			//you already found and renamed SendTable_Init, 
+			//it contains g_SendTableCRC,
+			//used once before CommandLine_Tier0(), something like DAT_XX = FUN_XX,
+			//raname DAT_XX to g_SendTableCRC and  FUN_XX to SendTable_ComputeCRC,
+			//go to xrefs of g_SendTableCRC, you will see 3 funcs,
+			//one of them sets g_SendTableCRC to 0 at very end of the function,
+			//the function that sets 0 for g_SendTableCRC is the func you want
+			"SendTable_Term"
+			{
+				"library"		"engine"
+				"windows"		"\x8B\x15\x2A\x2A\x2A\x2A\x56\x57\x8B\x3D\x2A\x2A\x2A\x2A\x33\xF6\x85\xFF\x7E\x2A\x8B\x04\xB2\x8B\x48\x0C\x85\xC9\x74\x2A\x8B\x01\x6A\x01\xFF\x10"
+				"linux"			"@_Z14SendTable_Termv"
+			}
+			
+			
+			//how to find:
+			//go to xrefs for ''RecvTable_Init: table '%s' has a decoder alr'',
+			//this string has 2 xrefs,
+			//the one with 2 params (something like undefined4 __cdecl FUN_XX(int param_1,int param_2)) is the func you want
+			"RecvTable_Init"
+			{
+				"library"		"engine"
+				// Verified engine.dll RVA 0x1A64D0: cdecl bool(RecvTable**, int).
+				// Stop before the alignment NOPs skipped by the short jump.
+				"windows"		"\x55\x8B\xEC\x51\x53\x33\xDB\x89\x5D\xFC\x39\x5D\x0C\x0F\x8E\x2A\x2A\x2A\x2A\x8B\x45\x08\x56\x57\xEB\x06"
+			}
+			
+			//how to find:
+			//go to xrefs for CHLTVServer::vftable,
+			//this vftable has 2 xrefs,
+			//the one you need also uses CHLTVFrame::vftable, IDemoPlayer::vftable, IBaseInterface::vftable, and IGameEventListener2::vftable,
+			//the one you need has if statement with param_1 use,
+			//the if statement contains 2 funcs, the one you want doesn't use param_1
+			"RecvTable_Term"
+			{
+				"library"		"engine"
+				// Verified engine.dll RVA 0x1A7020: cdecl void(bool).
+				// Clears RecvTable decoders/+0x11, then frees registry if arg != 0.
+				"windows"		"\x55\x8B\xEC\xE8\x2A\x2A\x2A\x2A\x0F\xB7\x05\x2A\x2A\x2A\x2A\x3D\xFF\xFF\x00\x00\x74\x2A\x56\x57\xEB\x06"
+			}
+			
+			//how to find: find by string ''CLocalNetworkBackdoor::EntState - missing client class %d''
+			//note: UNUSED
+			"CLocalNetworkBackdoor::EntState"
+			{
+				"library"		"engine"
+				"windows"		"\x55\x8B\xEC\x83\xEC\x0C\x2A\x2A\x2A\x2A\x56\x8B\xF1\x8B\x4D\x08\x8B\xC1\xC1\xE0\x04\x05\x24\x44\x00\x00\x03\xC6\x89\x45\xFC\x8B\xC1\x57\xC1\xF8\x05\x83\xE1\x1F\xBF\x01\x00\x00\x00\x89\x45\xF8\xD3\xE7\xB9\x2A\x2A\x2A\x2A\x53\x09\x3C\x86\xE8\x50\xC9\xEC\xFF"
+				"linux"			"@_ZN21CLocalNetworkBackdoor8EntStateEiiiPK9SendTablePKvbb"
+			}
+
+			//how to find: find by string ''Can\'t find factory for entity: %s\n''
+			//note: the real func name is CreateEntityByName
+			"CreateEntityByNameClient"
+			{
+				"library"		"client"
+				"windows"		"\x55\x8B\xEC\xE8\xE8\xA1\x05\x00\xFF\x75\x08\x8B\xC8\x8B\x10\xFF\x52\x0C\x85\xC0\x75\x13\xFF\x75\x08\x68\x2A\x2A\x2A\x2A\xFF\x15\x2A\x2A\x2A\x2A\x83\xC4\x08\x33\xC0\x5D\xC3"
+			}
+
+			//how to find: find by string ''cl:  create '%s'''
+			//note: UNUSED
+			"CL_CreateDLLEntity"
+			{
+				"library"		"engine"
+				"windows"		"\x55\x8B\xEC\x8B\x4D\x0C\xA1\x2A\x2A\x2A\x2A\x03\xC9\x56\x8B\x34\xC8\x85\xF6\x74\x35\xFF\x75\x08\xE8\x63\xEE\xFF\xFF\x83\xC4\x04\x83\x3D\x2A\x2A\x2A\x2A\x06\x74\x11\xFF\x76\x08\x68\x2A\x2A\x2A\x2A\xFF\x15\x2A\x2A\x2A\x2A\x83\xC4\x2A\x2A\x2A\x2A\x8B\x06\xFF"
 			}
 		}
 		"Addresses"

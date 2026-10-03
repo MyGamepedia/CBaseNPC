@@ -1,3 +1,4 @@
+#include "shared/datamaplookup.h"
 
 #include "idatamapcontainer.h"
 #include "helpers.h"
@@ -56,7 +57,7 @@ void IDataMapContainer::DestroyDataDescMap()
 	m_DataMapCache.Purge();
 
 	if (m_pDataMap->dataClassName)
-		delete m_pDataMap->dataClassName;
+		free(const_cast<char*>(m_pDataMap->dataClassName));
 	
 	delete[] m_pDataMap->dataDesc;
 	delete m_pDataMap;
@@ -91,6 +92,7 @@ void IDataMapContainer::DestroyDataDesc()
 	}
 
 	m_vecEntityDataTypeDescriptors.Purge();
+	m_DataMapDescSizeInBytes = 0;
 }
 
 void IDataMapContainer::BeginDataDesc()
@@ -187,6 +189,11 @@ void IDataMapContainer::EndDataDesc()
 
 void IDataMapContainer::DefineField(const char* name, fieldtype_t fieldType, unsigned short count, short flags, const char* externalName, float fieldTolerance)
 {
+	DefineFieldAndGetIndex(name, fieldType, count, flags, externalName, fieldTolerance);
+}
+
+int IDataMapContainer::DefineFieldAndGetIndex(const char* name, fieldtype_t fieldType, unsigned short count, short flags, const char* externalName, float fieldTolerance)
+{
 	size_t padding = 0;
 	int fieldOffset = GetAlignedOffset( GetDataDescOffset() + m_DataMapDescSizeInBytes, fieldType, &padding );
 	int fieldSizeInBytes = g_DataMapDescFieldSizes[fieldType] * count;
@@ -209,6 +216,7 @@ void IDataMapContainer::DefineField(const char* name, fieldtype_t fieldType, uns
 	});
 
 	m_DataMapDescSizeInBytes += padding + fieldSizeInBytes;
+	return m_vecEntityDataTypeDescriptors.Count() - 1;
 }
 
 // from sourcemod/public/compat_wrappers.h
@@ -216,38 +224,6 @@ void IDataMapContainer::DefineField(const char* name, fieldtype_t fieldType, uns
 inline int GetTypeDescOffs(typedescription_t *td)
 {
 	return td->fieldOffset[TD_OFFSET_NORMAL];
-}
-
-// from sourcemod/core/HalfLife2.cpp
-bool UTIL_FindDataMapInfo(datamap_t *pMap, const char *name, sm_datatable_info_t *pDataTable)
-{
-	while (pMap)
-	{
-		for (int i = 0; i < pMap->dataNumFields; ++i)
-		{
-			if (pMap->dataDesc[i].fieldName == NULL)
-			{
-				continue;
-			}
-			if (strcmp(name, pMap->dataDesc[i].fieldName) == 0)
-			{
-				pDataTable->prop = &(pMap->dataDesc[i]);
-				pDataTable->actual_offset = GetTypeDescOffs(pDataTable->prop);
-				return true;
-			}
-			if (pMap->dataDesc[i].td == NULL || !UTIL_FindDataMapInfo(pMap->dataDesc[i].td, name, pDataTable))
-			{
-				continue;
-			}
-			
-			pDataTable->actual_offset += GetTypeDescOffs(&(pMap->dataDesc[i]));
-			return true;
-		}
-		
-		pMap = pMap->baseMap;
-	}
-
-	return false; 
 }
 
 bool IDataMapContainer::FindDataMapInfo(const char* name, sm_datatable_info_t *pDataTable, char* error, size_t maxlen)
@@ -268,8 +244,10 @@ bool IDataMapContainer::FindDataMapInfo(const char* name, sm_datatable_info_t *p
 		return true;
 	}
 
-	if (UTIL_FindDataMapInfo( pDataMap, name, pDataTable ))
+	int actualOffset = -1;
+	if ((pDataTable->prop = CBaseNPCDataMapLookup::Find(pDataMap, name, &actualOffset)))
 	{
+		pDataTable->actual_offset = static_cast<unsigned int>(actualOffset);
 		m_DataMapCache.Insert(name, *pDataTable);
 		return true;
 	}
@@ -316,6 +294,7 @@ bool IDataMapContainer::GetObjectData( void* obj, const char* prop, int &data, i
 			return true;
 		case FIELD_CHARACTER:
 			data = *((int8_t*)obj + offset);
+			return true;
 		case FIELD_BOOLEAN:
 			data = *(bool*)((int8_t*)obj + offset);
 			return true;

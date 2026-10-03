@@ -33,6 +33,10 @@ project.sources = [
   'sourcesdk/baseanimating.cpp',
   'sourcesdk/baseanimatingoverlay.cpp',
   'sourcesdk/basecombatcharacter.cpp',
+  'sourcesdk/cbasenpcsendproxy.cpp',
+  'sourcesdk/cbasenpcsendtable.cpp',
+  'sourcesdk/cbasenpcserverclass.cpp',
+  'sourcesdk/cbasenpcnetworkschema.cpp',
   'sourcesdk/servernetworkproperty.cpp',
   'sourcesdk/collisionproperty.cpp',
   'sourcesdk/tracefilter_simple.cpp',
@@ -84,9 +88,18 @@ for sdk_name in Extension.sdks:
       ]
     elif sdk_name == 'bms':
       binary.sources += [
+        'client/cliententitymanager.cpp',
+        'client/cliententityproperties.cpp',
+        'client/cliententitynatives.cpp',
+        'sourcesdk/cbasenpcrecvproxy.cpp',
+        'sourcesdk/cbasenpcrecvtable.cpp',
+        'sourcesdk/cbasenpcclientclass.cpp',
+        'client/plugincliententityfactory.cpp',
         'natives/bms/nav.cpp',
         'natives/bms/nav/area.cpp',
       ]
+    if binary.compiler.target.platform == 'linux':
+      binary.compiler.linkflags += ['-ldl']
     Extension.AddCDetour(binary)
     binary.compiler.cxxincludes += [
       os.path.join(builder.currentSourcePath, 'sourcesdk'),

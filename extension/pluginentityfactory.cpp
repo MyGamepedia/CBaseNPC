@@ -1,9 +1,11 @@
 #include "pluginentityfactory.h"
+#include "sourcesdk/cbasenpcnetworkschema.h"
 #include "entityfactorydictionary.h"
 #include "cbasenpc_internal.h"
 #include "cbasenpc_behavior.h"
 #include "baseentityoutput.h"
 #include "sh_pagealloc.h"
+#include "sourcesdk/cbasenpcserverclass.h"
 
 SH_DECL_MANUALHOOK0(FactoryEntity_GetDataDescMap, 0, 0, 0, datamap_t* );
 SH_DECL_MANUALHOOK0_void(FactoryEntity_UpdateOnRemove, 0, 0, 0 );
@@ -120,20 +122,14 @@ PluginFactoryEntityRecord_t* CPluginEntityFactories::FindRecord(CBaseEntity* pEn
 		return nullptr;
 	}
 	
-	cell_t key = (cell_t)pEntity;
-	if (m_Records.find(key) == m_Records.end())
+	auto found = m_Records.find(pEntity);
+	if (found == m_Records.end())
 	{
-		if (create)
-		{
-			m_Records.emplace(key, std::make_unique<PluginFactoryEntityRecord_t>(pEntity));
-		}
-		else
-		{
-			return nullptr;
-		}
+		if (!create) return nullptr;
+		found = m_Records.emplace(pEntity, std::make_unique<PluginFactoryEntityRecord_t>(pEntity)).first;
 	}
 
-	return m_Records[key].get();
+	return found->second.get();
 }
 
 void CPluginEntityFactories::RemoveRecord(CBaseEntity* pEntity)
@@ -143,8 +139,7 @@ void CPluginEntityFactories::RemoveRecord(CBaseEntity* pEntity)
 		return;
 	}
 
-	cell_t key = (cell_t)pEntity;
-	m_Records.erase(key);
+	m_Records.erase(pEntity);
 }
 
 CPluginEntityFactory* CPluginEntityFactories::GetFactory(CBaseEntity* pEntity)
@@ -519,11 +514,11 @@ void CPluginEntityFactories::Hook_EntityDestructor( unsigned int flags )
 	RETURN_META(MRES_IGNORED);
 }
 
-void PluginFactoryEntityRecord_t::Hook(bool bHookDestructor)
+bool PluginFactoryEntityRecord_t::Hook(bool bHookDestructor)
 {
 	if (m_bHooked)
 	{
-		return;
+		return true;
 	}
 	m_bHooked = true;
 
@@ -561,6 +556,7 @@ void PluginFactoryEntityRecord_t::Hook(bool bHookDestructor)
 		m_pIntentionInterface = new CBaseNPCIntention(bot, m_pInitialActionFactory);
 		m_pHookIds.push_back(SH_ADD_HOOK(INextBot, GetIntentionInterface, bot, SH_MEMBER(this, &PluginFactoryEntityRecord_t::Hook_GetIntentionInterface), false));
 	}
+	return true;
 }
 
 PluginFactoryEntityRecord_t::~PluginFactoryEntityRecord_t()
@@ -904,6 +900,19 @@ size_t CPluginEntityFactory::GetBaseEntitySize() const
 
 IServerNetworkable* CPluginEntityFactory::Create(const char* classname)
 {
+	if (HasNetworkDefinition())
+	{
+		if (!g_CBaseNPCNetworkSchemaManager.IsFinalized() || !GetEffectiveServerClass())
+		{
+			g_pSM->LogError(myself, "Cannot create %s: custom network schema is not finalized or failed. Restart required after a schema failure.", classname);
+			return nullptr;
+		}
+		if (m_FinalNetworkEntitySize && GetEntitySize() != m_FinalNetworkEntitySize)
+		{
+			g_pSM->LogError(myself, "Cannot create %s: entity layout changed after network finalization. Restart required.", classname);
+			return nullptr;
+		}
+	}
 	return RecursiveCreate(classname, this);
 }
 
@@ -945,6 +954,12 @@ IServerNetworkable* CPluginEntityFactory::RecursiveCreate(const char* classname,
 
 			if (!g_EntityMemAllocHook.DidHandleAlloc())
 			{
+				if (pNet && entitySize > pBaseFactory->GetEntitySize() && pCreatingFactory->HasNetworkDefinition())
+				{
+					g_pSM->LogError(myself, "Cannot create %s: allocation hook did not reserve memory for custom network fields", classname);
+					servertools->RemoveEntityImmediate(pNet->GetBaseEntity());
+					return nullptr;
+				}
 				g_pSM->LogError(myself, "WARNING! Entity %s was instantiated with possibly incorrect size. (instantiating plugin factory: %s)", classname, m_iClassname.c_str());
 			}
 		}
@@ -972,6 +987,18 @@ IServerNetworkable* CPluginEntityFactory::RecursiveCreate(const char* classname,
 	if (pNet)
 	{
 		CBaseEntity* pEnt = pNet->GetBaseEntity();
+		if (bIsInstantiating)
+		{
+			// Retail CServerNetworkProperty already has an immutable ServerClass
+			// cache for this networking hot path. Initialize it before datamap
+			// construction, plugin callbacks, or exposure to snapshot workers so
+			// GetServerClass never has to enter SourceHook on a worker thread.
+			ServerClass* pServerClass = pCreatingFactory->GetEffectiveServerClass();
+			if (pServerClass)
+			{
+				pEnt->NetworkProp()->SetCachedServerClass(pServerClass);
+			}
+		}
 
 		if (HasDataDesc())
 		{
@@ -1036,7 +1063,14 @@ IServerNetworkable* CPluginEntityFactory::RecursiveCreate(const char* classname,
 
 		if (bIsInstantiating)
 		{
-			pEntityRecord->Hook(bHookDestructor);
+			if (!pEntityRecord->Hook(bHookDestructor))
+			{
+				g_pSM->LogError(myself, "Cannot install entity hooks for %s", classname);
+				DestroyUserEntityData(pEnt);
+				g_pPluginEntityFactories->RemoveRecord(pEnt);
+				servertools->RemoveEntityImmediate(pEnt);
+				return nullptr;
+			}
 		}
 
 		if (m_pPostConstructor && m_pPostConstructor->IsRunnable())
@@ -1051,6 +1085,7 @@ IServerNetworkable* CPluginEntityFactory::RecursiveCreate(const char* classname,
 
 bool CPluginEntityFactory::BeginDataDesc(const char* dataClassName)
 {
+	if (m_bNetworkLayoutFrozen) return false;
 	IEntityFactory *pBaseFactory = FindBaseFactory();
 	if (!pBaseFactory && IsBaseFactoryRequired())
 	{
@@ -1064,12 +1099,69 @@ bool CPluginEntityFactory::BeginDataDesc(const char* dataClassName)
 	m_iDataClassname = dataClassName;
 
 	BeginDataDesc();
+	m_SendFields.clear();
+	m_bDefiningDataDesc = true;
 
 	return true;
 }
 
+void CPluginEntityFactory::EndDataDesc()
+{
+	IEntityDataMapContainer::EndDataDesc();
+	m_bDefiningDataDesc = false;
+}
+
+bool CPluginEntityFactory::DefineServerClass(const char* name, const char* table, const char* base, std::string& error)
+{
+	if (!g_CBaseNPCServerClassManager.IsRegistrationOpen())
+	{
+		error = g_CBaseNPCServerClassManager.RegistrationError();
+		return false;
+	}
+	if (!name || !*name || !table || !*table || !base || !*base)
+	{
+		error = "ServerClass, SendTable and base network names must not be empty";
+		return false;
+	}
+	if (HasServerClassDeclaration() && (m_NetworkName != name || m_SendTableName != table || m_BaseNetworkName != base))
+	{
+		error = "factory already has a conflicting ServerClass declaration";
+		return false;
+	}
+	// Server-only (FL_EDICT_DONTSEND) does not imply the absence of a
+	// networkable interface. Such factories are valid and remain optional.
+	m_NetworkName = name;
+	m_SendTableName = table;
+	m_BaseNetworkName = base;
+	return true;
+}
+
+bool CPluginEntityFactory::HasNetworkDefinition() const
+{
+	if (HasServerClassDeclaration() || !m_SendFields.empty()) return true;
+	auto base = ToPluginEntityFactory(GetBaseFactory());
+	return base && base->HasNetworkDefinition();
+}
+
+ServerClass* CPluginEntityFactory::GetEffectiveServerClass() const
+{
+	if (HasServerClassDeclaration()) return m_pServerClass;
+	auto base = ToPluginEntityFactory(GetBaseFactory());
+	return base ? base->GetEffectiveServerClass() : nullptr;
+}
+
 void CPluginEntityFactory::CreateUserEntityData(CBaseEntity* pEntity)
 {
+	// Stock C++ constructors do not initialize our appended fields. Give send
+	// proxies safe defaults before any plugin post-constructor or snapshot can
+	// read them (in particular string_t and EHandle arrays).
+	for (const auto& field : m_SendFields)
+	{
+		auto td = GetFieldDescriptor(field.dataDescIndex);
+		if (!td) continue; // Validated by the finalizer for network entities.
+		memset(reinterpret_cast<unsigned char*>(pEntity) + td->fieldOffset[TD_OFFSET_NORMAL],
+			field.kind == CBaseNPCSendFieldKind::EHandle ? 0xff : 0, td->fieldSizeInBytes);
+	}
 	CreateFields(pEntity);
 }
 

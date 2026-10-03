@@ -294,6 +294,15 @@ cell_t NetworkStateChanged(IPluginContext* context, const cell_t* params) {
 	return 0;
 }
 
+cell_t SetClassname(IPluginContext* context, const cell_t* params) {
+	auto entity = Get(context, params[1]);
+	if (!entity) return 0;
+	char* classname = nullptr;
+	if (context->LocalToString(params[2], &classname) != SP_ERROR_NONE) return 0;
+	entity->SetClassname(classname);
+	return 0;
+}
+
 cell_t NetworkStateChangedVar(IPluginContext* context, const cell_t* params) {
 	auto entity = Get(context, params[1]);
 	if (!entity) {
@@ -554,6 +563,7 @@ void setup(std::vector<sp_nativeinfo_t>& natives) {
 		{"CBaseEntity.SetAbsAngles", SetAbsAngles},
 		{"CBaseEntity.SetAbsOrigin", SetAbsOrigin},
 		{"CBaseEntity.NetworkStateChanged", NetworkStateChanged},
+		{"CBaseEntity.SetClassname", SetClassname},
 		{"CBaseEntity.NetworkStateChangedVar", NetworkStateChangedVar},
 		{"CBaseEntity.GetSimulationTime", GetSimulationTime},
 		{"CBaseEntity.SetSimulationTime", SetSimulationTime},

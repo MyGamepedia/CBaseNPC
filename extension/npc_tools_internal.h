@@ -1,9 +1,9 @@
 #ifndef NPC_TOOLS_INTERNAL_H
 #define NPC_TOOLS_INTERNAL_H
 
-#include "shared/npctools.h"
+#include "shared/ICBaseNPCTools.h"
 
-class BaseNPC_Tools_API : public IBaseNPC_Tools
+class BaseNPC_Tools_API : public ICBaseNPCTools
 {
 public:
 	virtual const char* GetInterfaceName() override final;
