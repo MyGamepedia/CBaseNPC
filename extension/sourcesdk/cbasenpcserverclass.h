@@ -23,6 +23,8 @@ public:
 	bool IsRegistrationOpen() const;
 	const char* RegistrationError() const;
 	void BlockRegistrationForLateLoad();
+	bool RegisterDTPropBitsPatch(const char* tableName, const char* propName,
+		int bits, char* error, size_t maxlength);
 	bool HasInstalledNetworkDeclarations() const;
 	ServerClass* GetCombinedHead() const;
 	ServerClass* FindStockOrCustomClass(const char* name) const;

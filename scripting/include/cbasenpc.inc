@@ -251,6 +251,21 @@ public Extension __ext_cbasenpc =
 #if defined CBASENPC_BLACKMESA
 #include <cbasenpc/bms/cliententity>
 #include <cbasenpc/bms/entityfactoryclient>
+
+/**
+ * Changes the bit count used by an existing integer SendProp when the
+ * CBaseNPC network schema is finalized.
+ *
+ * Call this during initial plugin startup. Only direct DPT_Int properties of
+ * the named SendTable are supported. The change is server-side only.
+ *
+ * @param dataTable Exact SendTable name, for example "DT_TEWeaponBullets".
+ * @param property  Direct property name in that table, for example "weaponId".
+ * @param bits      New integer bit count, from 1 through 32.
+ * @error           Invalid or conflicting declaration, missing/wrong property,
+ *                  unavailable networking, or registration has already closed.
+ */
+native void SetDTPropBits(const char[] dataTable, const char[] property, int bits);
 #endif
 
 #if !defined REQUIRE_EXTENSIONS && defined CBASENPC_BLACKMESA

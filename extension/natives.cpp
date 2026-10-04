@@ -1,6 +1,7 @@
 #if SOURCE_ENGINE == SE_BMS
 #include "client/cliententitynatives.h"
 #include "client/plugincliententityfactory.h"
+#include "sourcesdk/cbasenpcserverclass.h"
 #endif
 #include "natives.hpp"
 
@@ -49,6 +50,22 @@ extern IForward *g_pForwardEventKilled;
 extern CUtlMap<int32_t, int32_t> g_EntitiesHooks;
 
 namespace natives {
+
+#if SOURCE_ENGINE == SE_BMS
+cell_t SetDTPropBits(IPluginContext* context, const cell_t* params)
+{
+	char* tableName = nullptr;
+	char* propName = nullptr;
+	if (context->LocalToString(params[1], &tableName) != SP_ERROR_NONE ||
+		context->LocalToString(params[2], &propName) != SP_ERROR_NONE)
+		return 0;
+	char error[512] = {};
+	if (!g_CBaseNPCServerClassManager.RegisterDTPropBitsPatch(
+		tableName, propName, params[3], error, sizeof(error)))
+		return context->ThrowNativeError("SetDTPropBits failed: %s", error);
+	return 0;
+}
+#endif
 
 #define ENTINDEX_TO_CBASEENTITY(ref, buffer) \
 	buffer = gamehelpers->ReferenceToEntity(ref); \
@@ -168,6 +185,7 @@ void setup(std::vector<sp_nativeinfo_t>& natives) {
 #if SOURCE_ENGINE == SE_BMS
 	setupClientEntityNatives(natives);
 	setupClientFactoryNatives(natives);
+	natives.push_back({"SetDTPropBits", &SetDTPropBits});
 #endif
 
 	baseanimating::setup(natives);
