@@ -56,6 +56,22 @@ struct FinalClass
 	ServerClass* Get() { return reinterpret_cast<ServerClass*>(&storage); }
 };
 
+struct DTPropBitsPatch
+{
+	std::string tableName;
+	std::string propName;
+	int bits;
+};
+
+struct PreparedDTPropBitsPatch
+{
+	SendTable* table;
+	std::string tableName;
+	std::string propName;
+	int oldBits;
+	int newBits;
+};
+
 bool SetError(char* error, size_t maxlength, const std::string& message)
 {
 	if (error && maxlength) snprintf(error, maxlength, "%s", message.c_str());
@@ -120,6 +136,34 @@ void CollectFieldNames(SendTable* table, std::set<SendTable*>& visited,
 			CollectFieldNames(prop->GetDataTable(), visited, names);
 	}
 }
+
+SendProp* FindDirectProp(SendTable* table, const char* name)
+{
+	if (!table || !name) return nullptr;
+	for (int i = 0; i < table->GetNumProps(); ++i)
+	{
+		auto prop = table->GetProp(i);
+		if (prop && prop->GetName() && !Q_stricmp(prop->GetName(), name)) return prop;
+	}
+	return nullptr;
+}
+
+void ValidateBitPatchTarget(SendTable* table, const DTPropBitsPatch& patch,
+	PreparedDTPropBitsPatch& prepared)
+{
+	auto prop = FindDirectProp(table, patch.propName.c_str());
+	if (!prop)
+		throw std::runtime_error(patch.tableName + "." + patch.propName +
+			" is not a direct SendProp of the named SendTable");
+	if (prop->GetType() != DPT_Int)
+		throw std::runtime_error(patch.tableName + "." + patch.propName +
+			" is type " + std::to_string(int(prop->GetType())) +
+			"; SetDTPropBits currently supports only DPT_Int");
+	if (prop->GetFlags() & SPROP_VARINT)
+		throw std::runtime_error(patch.tableName + "." + patch.propName +
+			" uses SPROP_VARINT; its fixed bit count cannot be patched");
+	prepared = {table, patch.tableName, patch.propName, prop->m_nBits, patch.bits};
+}
 }
 
 struct CBaseNPCServerClassManager::State
@@ -131,6 +175,8 @@ struct CBaseNPCServerClassManager::State
 	std::vector<ServerClass*> combined;
 	std::vector<SendTable*> roots;
 	std::map<CPluginEntityFactory*, FinalClass*> built;
+	std::vector<DTPropBitsPatch> bitPatches;
+	std::vector<PreparedDTPropBitsPatch> preparedBitPatches;
 	bool prepared = false;
 	ServerClass* head = nullptr;
 	int hook = 0;
@@ -218,8 +264,29 @@ void CBaseNPCServerClassManager::BlockRegistrationForLateLoad()
 	m_State->registrationBlocked = true;
 	m_State->registrationFailure = "Dynamic ServerClass/ClientClass registration is unavailable after a late extension load with existing entities; restart the game/server with CBaseNPC and its plugins loaded before map startup";
 }
+bool CBaseNPCServerClassManager::RegisterDTPropBitsPatch(const char* tableName,
+	const char* propName, int bits, char* error, size_t maxlength)
+{
+	if (!IsRegistrationOpen()) return SetError(error, maxlength, RegistrationError());
+	if (!tableName || !*tableName) return SetError(error, maxlength, "SendTable name must not be empty");
+	if (!propName || !*propName) return SetError(error, maxlength, "SendProp name must not be empty");
+	if (bits < 1 || bits > 32) return SetError(error, maxlength, "SendProp bit count must be in the range 1..32");
+	for (const auto& patch : m_State->bitPatches)
+	{
+		if (Q_stricmp(patch.tableName.c_str(), tableName) ||
+			Q_stricmp(patch.propName.c_str(), propName)) continue;
+		if (patch.bits == bits) return true;
+		return SetError(error, maxlength, "Conflicting DT bit patch for " +
+			patch.tableName + "." + patch.propName + ": " +
+			std::to_string(patch.bits) + " bits already requested, cannot request " +
+			std::to_string(bits));
+	}
+	m_State->bitPatches.push_back({tableName, propName, bits});
+	return true;
+}
 bool CBaseNPCServerClassManager::HasInstalledNetworkDeclarations() const
 {
+	if (m_State && !m_State->bitPatches.empty()) return true;
 	for (int i = 0; g_pPluginEntityFactories && i < g_pPluginEntityFactories->m_Factories.Count(); ++i)
 	{
 		auto factory = g_pPluginEntityFactories->m_Factories[i];
@@ -277,7 +344,7 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 				throw std::runtime_error(factory->m_iClassname + ": duplicate SendTable name " + factory->m_SendTableName);
 			declarations.emplace(factory->m_NetworkName, factory);
 		}
-		if (declarations.empty() && !forceRebuild)
+		if (declarations.empty() && state.bitPatches.empty() && !forceRebuild)
 		{
 			state.prepared = true; // Dedicated stock-only: no mutation needed.
 			return true;
@@ -353,6 +420,17 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 		// Include array tables and inherited stock tables, not just class roots.
 		for (auto& sc : state.classes) CollectTableNames(sc->table->GetTable(), stockTables, tableNames);
 		if (stockTables.size() > MAX_DATATABLES) throw std::runtime_error("too many SendTables (MAX_DATATABLES)");
+		state.preparedBitPatches.clear();
+		state.preparedBitPatches.reserve(state.bitPatches.size());
+		for (const auto& patch : state.bitPatches)
+		{
+			auto found = tableNames.find(patch.tableName);
+			if (found == tableNames.end() || !found->second)
+				throw std::runtime_error("SendTable " + patch.tableName + " does not exist");
+			PreparedDTPropBitsPatch prepared;
+			ValidateBitPatchTarget(found->second, patch, prepared);
+			state.preparedBitPatches.push_back(std::move(prepared));
+		}
 
 		auto& combined = state.combined;
 		combined.reserve(state.stock.size() + state.classes.size());
@@ -377,6 +455,7 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 		state.failed = true;
 		state.failure = ex.what();
 		state.built.clear(); state.classes.clear(); state.roots.clear(); state.combined.clear();
+		state.preparedBitPatches.clear();
 		return SetError(error, maxlength, state.failure);
 	}
 }
@@ -408,6 +487,21 @@ bool CBaseNPCServerClassManager::Commit(char* error, size_t maxlength)
 		auto& built = state.built;
 		auto& combined = state.combined;
 		state.term();
+		for (const auto& patch : state.preparedBitPatches)
+		{
+			auto prop = FindDirectProp(patch.table, patch.propName.c_str());
+			if (!prop)
+				throw std::runtime_error(patch.tableName + "." + patch.propName +
+					" disappeared after SendTable_Term; PROCESS RESTART REQUIRED");
+			if (prop->GetType() != DPT_Int || (prop->GetFlags() & SPROP_VARINT) ||
+				prop->m_nBits != patch.oldBits)
+				throw std::runtime_error(patch.tableName + "." + patch.propName +
+					" changed after preparation; PROCESS RESTART REQUIRED");
+			prop->m_nBits = patch.newBits;
+			if (CBaseNPCNetworkDebugEnabled())
+				g_pSM->LogMessage(myself, "[CBASENPC] Patched SendProp %s.%s bits: %d -> %d",
+					patch.tableName.c_str(), patch.propName.c_str(), patch.oldBits, patch.newBits);
+		}
 		if (!state.init(roots.data(), static_cast<int>(roots.size())))
 			throw std::runtime_error("SendTable_Init failed AFTER SendTable_Term. Engine networking is unsafe; PROCESS RESTART REQUIRED");
 		size_t fields = 0;
@@ -439,7 +533,7 @@ bool CBaseNPCServerClassManager::Commit(char* error, size_t maxlength)
 		}
 		if (actual) throw std::runtime_error("public ServerClass registry has unexpected entries; restart required");
 		state.finalized = true;
-		g_pSM->LogMessage(myself, "Finalized %u custom ServerClasses with %u custom SendProps; %u stock classes, %u ordered root SendTables.", unsigned(built.size()), unsigned(fields), unsigned(state.stock.size()), unsigned(roots.size()));
+		g_pSM->LogMessage(myself, "Finalized %u custom ServerClasses with %u custom SendProps and %u stock SendProp bit patches; %u stock classes, %u ordered root SendTables.", unsigned(built.size()), unsigned(fields), unsigned(state.preparedBitPatches.size()), unsigned(state.stock.size()), unsigned(roots.size()));
 		state.built.clear(); // Never retain plugin-owned factory pointers after publication.
 		return true;
 	}
