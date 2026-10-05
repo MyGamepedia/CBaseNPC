@@ -113,14 +113,36 @@ size_t CountProps(SendTable* table, std::set<SendTable*>& path)
 	return count;
 }
 
-void CollectTableNames(SendTable* table, std::set<SendTable*>& visited,
+void CollectStockTableNames(SendTable* table, std::set<SendTable*>& visited,
 	std::map<std::string, SendTable*, CaseInsensitiveCompare>& names)
 {
 	if (!table || !visited.insert(table).second) return;
-	CBaseNPCRegisterTableName(table, names);
+	CBaseNPCCollectStockTableName(table, names);
 	for (int i = 0; i < table->GetNumProps(); ++i)
 		if (table->GetProp(i)->GetType() == DPT_DataTable)
-			CollectTableNames(table->GetProp(i)->GetDataTable(), visited, names);
+			CollectStockTableNames(table->GetProp(i)->GetDataTable(), visited, names);
+}
+
+// A custom table owns its root and every non-baseclass child table created for
+// its fields. Its inherited base graph was already collected and validated.
+// Keep names created by CBaseNPC strict even though stock nested aliases are
+// legal, so custom schema lookup remains deterministic.
+void CollectOwnedTableNames(SendTable* table, std::set<SendTable*>& visited,
+	std::set<SendTable*>& all,
+	std::map<std::string, SendTable*, CaseInsensitiveCompare>& names)
+{
+	if (!table || !visited.insert(table).second) return;
+	if (!all.insert(table).second) return;
+	if (!table->GetName() || !*table->GetName())
+		throw std::runtime_error("unnamed custom SendTable");
+	if (!names.emplace(table->GetName(), table).second)
+		throw std::runtime_error(std::string("duplicate custom SendTable name: ") + table->GetName());
+	for (int i = 0; i < table->GetNumProps(); ++i)
+	{
+		auto prop = table->GetProp(i);
+		if (prop->GetType() == DPT_DataTable && Q_stricmp(prop->GetName(), "baseclass"))
+			CollectOwnedTableNames(prop->GetDataTable(), visited, all, names);
+	}
 }
 
 void CollectFieldNames(SendTable* table, std::set<SendTable*>& visited,
@@ -325,11 +347,12 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 		std::map<std::string, CPluginEntityFactory*, CaseInsensitiveCompare> declarations;
 		std::set<std::string, CaseInsensitiveCompare> classNames;
 		std::map<std::string, SendTable*, CaseInsensitiveCompare> tableNames;
+		std::set<std::string, CaseInsensitiveCompare> declaredTableNames;
 		std::set<SendTable*> stockTables;
 		for (auto sc : state.stock)
 		{
 			if (!classNames.insert(sc->m_pNetworkName).second) throw std::runtime_error("duplicate stock ServerClass name");
-			CollectTableNames(sc->m_pTable, stockTables, tableNames);
+			CollectStockTableNames(sc->m_pTable, stockTables, tableNames);
 		}
 		for (int i = 0; i < g_pPluginEntityFactories->m_Factories.Count(); ++i)
 		{
@@ -340,7 +363,8 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 			if (!factory->HasServerClassDeclaration()) continue;
 			if (!classNames.insert(factory->m_NetworkName).second)
 				throw std::runtime_error(factory->m_iClassname + ": duplicate ServerClass network name " + factory->m_NetworkName);
-			if (!tableNames.emplace(factory->m_SendTableName, nullptr).second)
+			if (tableNames.count(factory->m_SendTableName) ||
+				!declaredTableNames.insert(factory->m_SendTableName).second)
 				throw std::runtime_error(factory->m_iClassname + ": duplicate SendTable name " + factory->m_SendTableName);
 			declarations.emplace(factory->m_NetworkName, factory);
 		}
@@ -350,7 +374,12 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 			return true;
 		}
 		if (!state.available || !g_CBaseNPCSendProxy.IsInitialized()) throw std::runtime_error("networking dependencies are unavailable");
-		if (engine->GetEntityCount() > 0) throw std::runtime_error("too late to register network classes: edict pool already exists; restart required");
+		// Do not infer a late extension load from the current edict count.  BMS
+		// creates background/menu entities before SourceMod has finished loading
+		// its initial plugin set, so edicts normally exist when
+		// SDK_OnAllPluginsLoaded finalizes the schema.  The schema coordinator is
+		// the lifecycle authority: it uses SourceMod's real late-load flag and
+		// rejects a late load with existing entities before calling Prepare().
 		if (state.stock.size() + declarations.size() > MAX_SERVER_CLASSES) throw std::runtime_error("too many ServerClasses (MAX_SERVER_CLASSES)");
 
 		std::map<CPluginEntityFactory*, int> visit;
@@ -417,16 +446,25 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 			return ptr;
 		};
 		for (auto& decl : declarations) build(decl.second);
-		// Include array tables and inherited stock tables, not just class roots.
-		for (auto& sc : state.classes) CollectTableNames(sc->table->GetTable(), stockTables, tableNames);
+		// Register only tables owned by each custom class. Inherited stock/custom
+		// base graphs were already visited; stock is allowed to contain distinct
+		// nested objects with the same local table name.
+		for (auto& sc : state.classes)
+		{
+			std::set<SendTable*> owned;
+			CollectOwnedTableNames(sc->table->GetTable(), owned, stockTables, tableNames);
+		}
 		if (stockTables.size() > MAX_DATATABLES) throw std::runtime_error("too many SendTables (MAX_DATATABLES)");
 		state.preparedBitPatches.clear();
 		state.preparedBitPatches.reserve(state.bitPatches.size());
 		for (const auto& patch : state.bitPatches)
 		{
 			auto found = tableNames.find(patch.tableName);
-			if (found == tableNames.end() || !found->second)
+			if (found == tableNames.end())
 				throw std::runtime_error("SendTable " + patch.tableName + " does not exist");
+			if (!found->second)
+				throw std::runtime_error("SendTable name " + patch.tableName +
+					" is ambiguous because multiple stock tables use it");
 			PreparedDTPropBitsPatch prepared;
 			ValidateBitPatchTarget(found->second, patch, prepared);
 			state.preparedBitPatches.push_back(std::move(prepared));
