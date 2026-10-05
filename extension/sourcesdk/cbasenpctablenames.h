@@ -25,4 +25,19 @@ void CBaseNPCRegisterTableName(Table* table, std::map<std::string, Table*, Compa
   }
 }
 
+// Stock Source schemas may contain separate nested/array table objects with
+// the same local name (BMS has several named m_ModulationColors). They are
+// legal because they are reached through different root paths. Preserve a
+// unique pointer when possible and mark an ambiguous name with nullptr so a
+// name-based operation can reject it instead of choosing an arbitrary table.
+template <typename Table, typename Compare>
+void CBaseNPCCollectStockTableName(Table* table, std::map<std::string, Table*, Compare>& names)
+{
+  if (!table || !table->GetName() || !*table->GetName())
+    throw std::runtime_error("unnamed network table");
+  auto inserted = names.emplace(table->GetName(), table);
+  if (!inserted.second && inserted.first->second != table)
+    inserted.first->second = nullptr;
+}
+
 #endif

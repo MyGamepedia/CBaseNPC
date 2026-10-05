@@ -49,20 +49,32 @@ bool ContainsTable(RecvTable* table, RecvTable* target, std::set<RecvTable*>& se
  return false;
 }
 void ValidateTable(RecvTable* table, std::set<RecvTable*>& path, std::set<RecvTable*>& all,
- std::map<std::string, RecvTable*, CaseInsensitiveCompare>& names)
+ std::map<std::string, RecvTable*, CaseInsensitiveCompare>* stockNames = nullptr)
 {
  if (!table || !table->GetName() || !*table->GetName() || !path.insert(table).second)
    throw std::runtime_error("invalid/cyclic RecvTable graph");
  if (path.size() > 64) throw std::runtime_error("RecvTable inheritance exceeds 64 levels");
- if (all.insert(table).second) CBaseNPCRegisterTableName(table, names);
+ if (all.insert(table).second && stockNames) CBaseNPCCollectStockTableName(table, *stockNames);
  if (all.size() > MAX_DATATABLES || table->GetNumProps() < 0 || table->GetNumProps() > MAX_DATATABLE_PROPS)
    throw std::runtime_error("RecvTable graph exceeds engine limits");
  for (int i = 0; i < table->GetNumProps(); ++i) {
    auto prop = table->GetProp(i);
    if (!prop->GetName()) throw std::runtime_error("unnamed RecvProp");
-   if (prop->GetType() == DPT_DataTable) ValidateTable(prop->GetDataTable(), path, all, names);
+   if (prop->GetType() == DPT_DataTable) ValidateTable(prop->GetDataTable(), path, all, stockNames);
  }
  path.erase(table);
+}
+void CollectOwnedTableNames(RecvTable* table, bool includeRoot,
+ std::set<RecvTable*>& seen, std::set<std::string, CaseInsensitiveCompare>& unavailable)
+{
+ if (!table || !seen.insert(table).second) return;
+ if (includeRoot && !unavailable.insert(table->GetName()).second)
+   throw std::runtime_error(std::string("duplicate custom RecvTable name: ") + table->GetName());
+ for (int i = 0; i < table->GetNumProps(); ++i) {
+   auto prop = table->GetProp(i);
+   if (prop->GetType() == DPT_DataTable && Q_stricmp(prop->GetName(), "baseclass"))
+     CollectOwnedTableNames(prop->GetDataTable(), true, seen, unavailable);
+ }
 }
 void MatchFields(SendTable* send, RecvTable* recv)
 {
@@ -173,12 +185,16 @@ bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxleng
      if (factory && factory->m_bInstalled && factory->HasServerClassDeclaration()) servers.emplace(factory->m_NetworkName, factory);
    }
    std::map<std::string, CPluginClientEntityFactory*, CaseInsensitiveCompare> declarations;
-   std::map<std::string, RecvTable*, CaseInsensitiveCompare> tableNames;
+   std::map<std::string, RecvTable*, CaseInsensitiveCompare> stockTableNames;
+   std::set<std::string, CaseInsensitiveCompare> unavailableTableNames;
    std::set<RecvTable*> all, path;
-   for (auto cc : s.stock) ValidateTable(cc->m_pRecvTable, path, all, tableNames);
+   for (auto cc : s.stock) ValidateTable(cc->m_pRecvTable, path, all, &stockTableNames);
+   for (const auto& item : stockTableNames) unavailableTableNames.insert(item.first);
    for (auto factory : g_PluginClientEntityFactories.All()) {
      if (!factory->installed) continue;
-     if (FindStockOrCustomClass(factory->networkName.c_str()) || !declarations.emplace(factory->networkName, factory).second || !tableNames.emplace(factory->tableName, nullptr).second)
+     if (FindStockOrCustomClass(factory->networkName.c_str()) ||
+         !declarations.emplace(factory->networkName, factory).second ||
+         !unavailableTableNames.insert(factory->tableName).second)
        throw std::runtime_error("duplicate ClientClass/RecvTable declaration: " + factory->networkName);
      auto server = servers.find(factory->networkName);
      if (server == servers.end() || server->second->m_SendTableName != factory->tableName || server->second->m_BaseNetworkName != factory->networkBase || server->second->m_iClassname != factory->classname)
@@ -231,7 +247,11 @@ bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxleng
      result->storage = {createThunks[s.classes.size()], nullptr, table->CopyString(f->networkName.c_str()), table->GetTable(), nullptr, -1, table->CopyString(f->classname.c_str())};
      auto server = g_CBaseNPCServerClassManager.FindStockOrCustomClass(f->networkName.c_str());
      MatchFields(server ? server->m_pTable : nullptr, table->GetTable());
-     ValidateTable(table->GetTable(), path, all, tableNames);
+     ValidateTable(table->GetTable(), path, all);
+     std::set<RecvTable*> owned;
+     // The root name was reserved with the declaration. Register only its
+     // owned non-baseclass children here.
+     CollectOwnedTableNames(table->GetTable(), false, owned, unavailableTableNames);
      auto ptr = result.get(); s.classes.push_back(std::move(result)); built[f] = ptr; visit[f] = 2;
      return ptr;
    };
