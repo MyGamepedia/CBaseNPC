@@ -374,7 +374,12 @@ bool CBaseNPCServerClassManager::Prepare(bool forceRebuild, char* error, size_t 
 			return true;
 		}
 		if (!state.available || !g_CBaseNPCSendProxy.IsInitialized()) throw std::runtime_error("networking dependencies are unavailable");
-		if (engine->GetEntityCount() > 0) throw std::runtime_error("too late to register network classes: edict pool already exists; restart required");
+		// Do not infer a late extension load from the current edict count.  BMS
+		// creates background/menu entities before SourceMod has finished loading
+		// its initial plugin set, so edicts normally exist when
+		// SDK_OnAllPluginsLoaded finalizes the schema.  The schema coordinator is
+		// the lifecycle authority: it uses SourceMod's real late-load flag and
+		// rejects a late load with existing entities before calling Prepare().
 		if (state.stock.size() + declarations.size() > MAX_SERVER_CLASSES) throw std::runtime_error("too many ServerClasses (MAX_SERVER_CLASSES)");
 
 		std::map<CPluginEntityFactory*, int> visit;

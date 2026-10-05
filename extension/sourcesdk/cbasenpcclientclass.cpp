@@ -174,11 +174,14 @@ bool CBaseNPCClientClassManager::Prepare(bool inert, char* error, size_t maxleng
  try {
    if (inert) {
      s.inert = true;
-     s.prepared = true;
-     return true;
-   }
-   if (engine->GetEntityCount() > 0 || g_ClientEntityManager.GetClientEntityCount())
-     throw std::runtime_error("Client schema registration is too late: entities already exist; restart required");
+   s.prepared = true;
+   return true;
+ }
+   // Existing entities do not imply that the extension itself was loaded
+   // late.  On a normal BMS listen-server startup the background client and
+   // server worlds already contain entities before SDK_OnAllPluginsLoaded.
+   // CBaseNPCNetworkSchemaManager owns the late-load decision and rejects an
+   // unsafe late load before either schema manager reaches Prepare().
    std::map<std::string, CPluginEntityFactory*, CaseInsensitiveCompare> servers;
    for (int i = 0; i < g_pPluginEntityFactories->m_Factories.Count(); ++i) {
      auto factory = g_pPluginEntityFactories->m_Factories[i];
