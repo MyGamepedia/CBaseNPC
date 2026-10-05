@@ -98,11 +98,34 @@ enum CBaseNPCDataMapIndex : size_t
 	DATAMAP_CFUNCBRUSH,
 	DATAMAP_COUNT
 };
+
+bool ResolveServerEntityList(char* error, size_t maxlength)
+{
+	// The SDK's inline CBaseHandle::Get() resolves through this module's
+	// g_pEntityList symbol. Static datamaps remove the need for a temporary
+	// edict, but they do not remove that runtime dependency. SourceMod resolves
+	// the process-lifetime server entity list before loading extensions, so make
+	// it an explicit SDK_OnLoad precondition before any initializer can touch an
+	// EHANDLE.
+	void* entityList = gamehelpers->GetGlobalEntityList();
+	if (!entityList)
+	{
+		snprintf(error, maxlength,
+			"SourceMod did not provide the server entity list; CBaseNPC cannot safely resolve EHANDLE values");
+		return false;
+	}
+
+	g_pEntityList = static_cast<CBaseEntityList*>(entityList);
+	return true;
+}
 }
 
 bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	if (g_CBaseNPCNetworkSchemaManager.IsPublished()) {
 		snprintf(error, maxlength, "CBaseNPC schema is already published in this process; PROCESS RESTART REQUIRED");
+		return false;
+	}
+	if (!ResolveServerEntityList(error, maxlength)) {
 		return false;
 	}
 	char conf_error[255];
@@ -351,7 +374,6 @@ void CBaseNPCExt::SDK_OnAllLoaded() {
 		g_pSDKHooks->AddEntityListener(this);
 	} 
 
-	g_pEntityList = (CBaseEntityList *)gamehelpers->GetGlobalEntityList();
 }
 
 void CBaseNPCExt::SDK_OnAllPluginsLoaded()
@@ -490,6 +512,16 @@ bool CBaseNPCExt::Hook_LevelInit(const char* pMapName, const char* pMapEntities,
 
 bool CBaseNPCExt::Initialize(char* error, size_t maxlength, datamap_t* const* dataMaps)
 {
+	// Initialize() can also be reached from the deferred LevelInit path. Keep
+	// the EHANDLE precondition local so future call sites cannot accidentally
+	// reintroduce the SDK_OnLoad ordering bug.
+	if (!g_pEntityList)
+	{
+		snprintf(error, maxlength,
+			"Server entity list is unavailable; refusing to initialize EHANDLE-dependent CBaseNPC code");
+		return false;
+	}
+
 	if (!CBaseEntity::Init(g_pGameConf, error, maxlength, dataMaps ? dataMaps[DATAMAP_CBASEENTITY] : nullptr)
 		|| !CBaseAnimating::Init(g_pGameConf, error, maxlength, dataMaps ? dataMaps[DATAMAP_CBASEANIMATING] : nullptr)
 		|| !CBaseAnimatingOverlay::Init(g_pGameConf, error, maxlength, dataMaps ? dataMaps[DATAMAP_CBASEANIMATINGOVERLAY] : nullptr)
