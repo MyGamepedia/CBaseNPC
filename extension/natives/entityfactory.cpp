@@ -50,7 +50,7 @@ cell_t CPluginEntityFactory_Ctor(IPluginContext * context, const cell_t * params
 		return context->ThrowNativeError("Entity factory must have a classname");
 	}
 
-	IPlugin* plugin = plsys->FindPluginByContext(context);
+	IPlugin* plugin = CBaseNPCGetOwningPlugin(context);
 	IPluginFunction *postConstructor = context->GetFunctionById(params[2]);
 	IPluginFunction *onRemove = context->GetFunctionById(params[3]);
 
@@ -63,8 +63,9 @@ cell_t CPluginEntityFactory_Ctor(IPluginContext * context, const cell_t * params
 		}
 	}
 
-	CPluginEntityFactory* factory = new CPluginEntityFactory(plugin, classname, postConstructor, onRemove);
-	return factory->m_Handle;
+	CPluginEntityFactory* factory = new CPluginEntityFactory(plugin, classname, postConstructor, onRemove, context->GetIdentity());
+	if (!factory->m_Handle) { delete factory; return context->ThrowNativeError("Could not create entity factory handle"); }
+	return CBaseNPCTrackNativeHandle(context, factory->m_Handle, plugin ? plugin->GetIdentity() : context->GetIdentity());
 }
 
 cell_t GetFactoryOfEntity(IPluginContext* context, const cell_t * params) {

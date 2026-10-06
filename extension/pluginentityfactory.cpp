@@ -1,4 +1,5 @@
 #include "pluginentityfactory.h"
+#include "cbasenpcinterfaces.h"
 #include "sourcesdk/cbasenpcnetworkschema.h"
 #include "entityfactorydictionary.h"
 #include "cbasenpc_internal.h"
@@ -383,16 +384,26 @@ void CPluginEntityFactories::OnFactoryDestroyed( CPluginEntityFactory* pFactory 
 
 void CPluginEntityFactories::OnFactoryInstall(CPluginEntityFactory * pFactory)
 {
+	const std::string classname = pFactory->m_iClassname;
+	sp::CallArgs args;
+	args.PushString(classname.c_str());
+	args.PushCell(pFactory->m_Handle);
 	m_fwdInstalledFactory->PushString(pFactory->m_iClassname.c_str());
 	m_fwdInstalledFactory->PushCell(pFactory->m_Handle);
 	m_fwdInstalledFactory->Execute();
+	CBaseNPCDispatchForward("CEntityFactory_OnInstalled", args);
 }
 
 void CPluginEntityFactories::OnFactoryUninstall(CPluginEntityFactory * pFactory)
 {
+	const std::string classname = pFactory->m_iClassname;
+	sp::CallArgs args;
+	args.PushString(classname.c_str());
+	args.PushCell(pFactory->m_Handle);
 	m_fwdUninstalledFactory->PushString(pFactory->m_iClassname.c_str());
 	m_fwdUninstalledFactory->PushCell(pFactory->m_Handle);
 	m_fwdUninstalledFactory->Execute();
+	CBaseNPCDispatchForward("CEntityFactory_OnUninstalled", args);
 }
 
 int CPluginEntityFactories::GetInstalledFactoryHandles(Handle_t* pHandleArray, size_t arraySize)
@@ -614,7 +625,7 @@ CPluginEntityFactory* CPluginEntityFactory::ToPluginEntityFactory( IEntityFactor
 	return g_pPluginEntityFactories->ToPluginEntityFactory( pFactory );
 }
 
-CPluginEntityFactory::CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor, IPluginFunction *onRemove ) :
+CPluginEntityFactory::CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor, IPluginFunction *onRemove, IdentityToken_t* owner ) :
 	IEntityDataMapContainer(),
 	m_iClassname(classname),
 	m_pPlugin(plugin),
@@ -626,7 +637,7 @@ CPluginEntityFactory::CPluginEntityFactory( IPlugin* plugin, const char* classna
 {
 	m_Derive.m_DeriveFrom = DERIVETYPE_NONE;
 
-	m_Handle = handlesys->CreateHandle( g_pPluginEntityFactories->GetFactoryType(), this, plugin->GetIdentity(), myself->GetIdentity(), nullptr );
+	m_Handle = handlesys->CreateHandle( g_pPluginEntityFactories->GetFactoryType(), this, plugin ? plugin->GetIdentity() : owner, myself->GetIdentity(), nullptr );
 
 	m_bIsAbstract = false;
 	m_pBaseFactory = nullptr;

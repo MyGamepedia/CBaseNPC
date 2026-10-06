@@ -2,7 +2,7 @@
 #define _INCLUDE_CBASENPC_CLIENT_ENTITY_MANAGER_H_
 
 #include "smsdk_ext.h"
-#include "shared/ICBaseNPCClientEntityManager.h"
+#include "shared/ICBaseNPCClient.h"
 #include "cliententityproperties.h"
 
 #include <basehandle.h>
@@ -57,14 +57,13 @@ public:
 }
 
 class CClientEntityManager final :
-  public CBaseNPCClient::IClientEntityListener,
-  public SourceMod::ICBaseNPCClientEntityManager
+  public CBaseNPCClient::IClientEntityListener
 {
 public:
   bool Initialize(SourceMod::IGameConfig *gameConfig, char *error, size_t maxlength);
   void Shutdown();
   void DetachPluginConsumers();
-  bool IsAvailable() const override { return available_; }
+  bool IsAvailable() const { return available_; }
 
   IBaseClientDLL *GetBaseClientDLL() const { return clientDll_; }
   IClientEntityList *GetClientEntityList() const { return clientEntityList_; }
@@ -78,18 +77,18 @@ public:
   void OnEntityCreated(C_BaseEntity *entity) override;
   void OnEntityDeleted(C_BaseEntity *entity) override;
 
-  void *ResolveClientEntityRef(int clientRef) override;
+  void *ResolveClientEntityRef(int clientRef);
   bool ResolveAccess(int clientRef, CBaseNPCClientEntityAccess& access);
-  int EntityToClientRef(void *entity) override;
-  int EntityToClientHandleRef(void *entity) override;
-  bool IsSameClientEntity(void *entity, int clientHandleRef) override;
-  int ClientHandleToEntityRef(const void *handleAddress) override;
-  bool EntityRefToClientHandle(int clientRef, void *handleAddress) override;
-  int GetClientEntityCount() const override;
-  int GetEntityRefByOrdinalClient(int ordinal) const override;
-  const char *GetEntityClassnameClient(int clientRef) override;
-  void AddClientEntityListener(SourceMod::ICBaseNPCClientEntityListener *listener) override;
-  void RemoveClientEntityListener(SourceMod::ICBaseNPCClientEntityListener *listener) override;
+  int EntityToClientRef(void *entity);
+  int EntityToClientHandleRef(void *entity);
+  bool IsSameClientEntity(void *entity, int clientHandleRef);
+  int ClientHandleToEntityRef(const void *handleAddress);
+  bool EntityRefToClientHandle(int clientRef, void *handleAddress);
+  int GetClientEntityCount() const;
+  int GetEntityRefByOrdinalClient(int ordinal) const;
+  const char *GetEntityClassnameClient(int clientRef);
+  void AddClientEntityListener(SourceMod::ICBaseNPCClientEntityListener *listener);
+  void RemoveClientEntityListener(SourceMod::ICBaseNPCClientEntityListener *listener);
 
   int FindClientEntityByClassname(int startRef, const char *classname);
   bool GetEntityClassnameDiagnostics(int clientRef, int *entIndex,

@@ -4,6 +4,7 @@
 #include "sourcesdk/cbasenpcserverclass.h"
 #endif
 #include "natives.hpp"
+#include "cbasenpcinterfaces.h"
 
 #include "natives/baseanimating.hpp"
 #include "natives/baseanimatingoverlay.hpp"
@@ -61,7 +62,7 @@ cell_t SetDTPropBits(IPluginContext* context, const cell_t* params)
 		return 0;
 	char error[512] = {};
 	if (!g_CBaseNPCServerClassManager.RegisterDTPropBitsPatch(
-		tableName, propName, params[3], error, sizeof(error)))
+		tableName, propName, params[3], error, sizeof(error), context->GetIdentity()))
 		return context->ThrowNativeError("SetDTPropBits failed: %s", error);
 	return 0;
 }
@@ -103,6 +104,17 @@ void Event_Killed(CTakeDamageInfoHack &info)
 		g_pForwardEventKilled->PushArray(damagePosition, 3, SM_PARAM_COPYBACK);
 		g_pForwardEventKilled->PushCell(info.GetDamageCustom());
 		g_pForwardEventKilled->Execute(&res);
+		sp::CallArgs cppArgs;
+		cppArgs.PushCell(entity);
+		cppArgs.PushCellByRef(&attacker);
+		cppArgs.PushCellByRef(&inflictor);
+		cppArgs.PushFloatByRef(&damage);
+		cppArgs.PushCellByRef(&damagetype);
+		cppArgs.PushCellByRef(&weapon);
+		cppArgs.PushArray(damageForce, 3, SM_PARAM_COPYBACK);
+		cppArgs.PushArray(damagePosition, 3, SM_PARAM_COPYBACK);
+		cppArgs.PushCell(info.GetDamageCustom());
+		res = CBaseNPCDispatchForward("CBaseCombatCharacter_EventKilled", cppArgs, res);
 		
 		if (res >= ret)
 		{

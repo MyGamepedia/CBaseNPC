@@ -174,7 +174,7 @@ public:
 
 	Handle_t m_Handle;
 
-	CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor=nullptr, IPluginFunction *onRemove=nullptr );
+	CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor=nullptr, IPluginFunction *onRemove=nullptr, IdentityToken_t* owner=nullptr );
 	virtual ~CPluginEntityFactory();
 
 	bool Install();

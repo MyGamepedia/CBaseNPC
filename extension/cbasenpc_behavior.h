@@ -250,7 +250,7 @@ private:
 public:
 	Handle_t m_Handle;
 
-	CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName );
+	CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName, IdentityToken_t* owner=nullptr );
 	virtual ~CBaseNPCPluginActionFactory();
 
 	virtual int GetDataDescOffset() const override final { return 0; }

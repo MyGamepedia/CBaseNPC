@@ -624,7 +624,7 @@ void CBaseNPCPluginActionFactories::OnFactoryDestroyed( CBaseNPCPluginActionFact
 	m_Factories.FindAndRemove( pFactory );
 }
 
-CBaseNPCPluginActionFactory::CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName ) : 
+CBaseNPCPluginActionFactory::CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName, IdentityToken_t* owner ) : 
 	IDataMapContainer(),
 	m_bDestroying(false),
 	m_iActionName(actionName)
@@ -633,7 +633,7 @@ CBaseNPCPluginActionFactory::CBaseNPCPluginActionFactory( IPlugin* plugin, const
 	SetDefLessFunc(m_QueryCallbacks);
 	SetDefLessFunc(m_EventCallbacks);
 
-	m_Handle = handlesys->CreateHandle( g_pBaseNPCPluginActionFactories->GetFactoryType(), this, plugin->GetIdentity(), myself->GetIdentity(), nullptr );
+	m_Handle = handlesys->CreateHandle( g_pBaseNPCPluginActionFactories->GetFactoryType(), this, plugin ? plugin->GetIdentity() : owner, myself->GetIdentity(), nullptr );
 
 	g_pBaseNPCPluginActionFactories->OnFactoryCreated( this );
 }

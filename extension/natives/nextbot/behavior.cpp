@@ -39,9 +39,10 @@ cell_t NextBotActionFactory_Ctor(IPluginContext* context, const cell_t* params) 
 		return context->ThrowNativeError("Action must have a name");
 	}
 	
-	IPlugin* plugin = plsys->FindPluginByContext(context);
-	CBaseNPCPluginActionFactory* factory = new CBaseNPCPluginActionFactory(plugin, name);
-	return factory->m_Handle;
+	IPlugin* plugin = CBaseNPCGetOwningPlugin(context);
+	CBaseNPCPluginActionFactory* factory = new CBaseNPCPluginActionFactory(plugin, name, context->GetIdentity());
+	if (!factory->m_Handle) { delete factory; return context->ThrowNativeError("Could not create action factory handle"); }
+	return CBaseNPCTrackNativeHandle(context, factory->m_Handle);
 }
 
 cell_t SetCallback(IPluginContext* context, const cell_t* params) {

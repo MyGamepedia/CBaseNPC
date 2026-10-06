@@ -61,6 +61,7 @@ struct DTPropBitsPatch
 	std::string tableName;
 	std::string propName;
 	int bits;
+	std::set<SourceMod::IdentityToken_t*> owners;
 };
 
 struct PreparedDTPropBitsPatch
@@ -287,24 +288,33 @@ void CBaseNPCServerClassManager::BlockRegistrationForLateLoad()
 	m_State->registrationFailure = "Dynamic ServerClass/ClientClass registration is unavailable after a late extension load with existing entities; restart the game/server with CBaseNPC and its plugins loaded before map startup";
 }
 bool CBaseNPCServerClassManager::RegisterDTPropBitsPatch(const char* tableName,
-	const char* propName, int bits, char* error, size_t maxlength)
+	const char* propName, int bits, char* error, size_t maxlength, SourceMod::IdentityToken_t* owner)
 {
 	if (!IsRegistrationOpen()) return SetError(error, maxlength, RegistrationError());
 	if (!tableName || !*tableName) return SetError(error, maxlength, "SendTable name must not be empty");
 	if (!propName || !*propName) return SetError(error, maxlength, "SendProp name must not be empty");
 	if (bits < 1 || bits > 32) return SetError(error, maxlength, "SendProp bit count must be in the range 1..32");
-	for (const auto& patch : m_State->bitPatches)
+	for (auto& patch : m_State->bitPatches)
 	{
 		if (Q_stricmp(patch.tableName.c_str(), tableName) ||
 			Q_stricmp(patch.propName.c_str(), propName)) continue;
-		if (patch.bits == bits) return true;
+		if (patch.bits == bits) { patch.owners.insert(owner); return true; }
 		return SetError(error, maxlength, "Conflicting DT bit patch for " +
 			patch.tableName + "." + patch.propName + ": " +
 			std::to_string(patch.bits) + " bits already requested, cannot request " +
 			std::to_string(bits));
 	}
-	m_State->bitPatches.push_back({tableName, propName, bits});
+	m_State->bitPatches.push_back({tableName, propName, bits, {owner}});
 	return true;
+}
+void CBaseNPCServerClassManager::RemoveDTPropBitsPatches(SourceMod::IdentityToken_t* owner)
+{
+	if (!m_State || m_State->attempted || !owner) return;
+	auto& patches = m_State->bitPatches;
+	for (auto& patch : patches) patch.owners.erase(owner);
+	patches.erase(std::remove_if(patches.begin(), patches.end(), [](const DTPropBitsPatch& patch) {
+		return patch.owners.empty();
+	}), patches.end());
 }
 bool CBaseNPCServerClassManager::HasInstalledNetworkDeclarations() const
 {

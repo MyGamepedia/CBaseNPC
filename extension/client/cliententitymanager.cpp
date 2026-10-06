@@ -1,4 +1,5 @@
 #include "cliententitymanager.h"
+#include "cbasenpcinterfaces.h"
 #include "sourcesdk/cbasenpcclientlookup.h"
 #include "sourcesdk/cbasenpcclientclass.h"
 #include "sourcesdk/cbasenpcnetworkschema.h"
@@ -352,6 +353,12 @@ void CClientEntityManager::NotifyCreated(C_BaseEntity* entity, uint32_t handleVa
     onEntityCreated_->Execute(nullptr);
   }
 
+  sp::CallArgs args;
+  args.PushCell(clientRef);
+  args.PushString(classname.c_str());
+  int64_t address = static_cast<int64_t>(reinterpret_cast<uintptr_t>(entity));
+  args.PushArray(reinterpret_cast<cell_t*>(&address), 2);
+  CBaseNPCDispatchForward("OnEntityCreatedClient", args);
   const auto snapshot = listeners_;
   for (auto *listener : snapshot)
   {
@@ -419,6 +426,11 @@ void CClientEntityManager::OnEntityDeleted(C_BaseEntity *entity)
   {
     onEntityDestroyed_->PushCell(clientRef);
     onEntityDestroyed_->Execute(nullptr);
+  }
+  if (notify) {
+    sp::CallArgs args;
+    args.PushCell(clientRef);
+    CBaseNPCDispatchForward("OnEntityDestroyedClient", args);
   }
   const auto snapshot = listeners_;
   for (auto *listener : snapshot)

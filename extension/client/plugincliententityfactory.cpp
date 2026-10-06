@@ -1,4 +1,5 @@
 #include "plugincliententityfactory.h"
+#include "cbasenpcinterfaces.h"
 #include "sourcesdk/cbasenpcserverclass.h"
 #include <algorithm>
 #include <cstdio>
@@ -59,12 +60,12 @@ cell_t New(IPluginContext* context, const cell_t* params)
  if (!Editable(context)) return 0;
  auto factory = new CPluginClientEntityFactory;
  if (!Name(context, params[1], factory->classname)) { delete factory; return 0; }
- factory->plugin = plsys->FindPluginByContext(context);
+ factory->plugin = CBaseNPCGetOwningPlugin(context);
  factory->postConstructor = context->GetFunctionById(params[2]);
  factory->onRemove = context->GetFunctionById(params[3]);
  auto handle = handlesys->CreateHandle(g_PluginClientEntityFactories.Type(), factory, context->GetIdentity(), myself->GetIdentity(), nullptr);
  if (!handle) { delete factory; return context->ThrowNativeError("Could not create client factory handle"); }
- g_PluginClientEntityFactories.Add(factory); return handle;
+ g_PluginClientEntityFactories.Add(factory); return CBaseNPCTrackNativeHandle(context, handle, context->GetIdentity());
 }
 cell_t Define(IPluginContext* context, const cell_t* params)
 {
