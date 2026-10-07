@@ -15,8 +15,7 @@
 
 #define BEGINACTIONCALLBACKEX(funcName, typeName, ...) \
 ActionResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##__VA_ARGS__) { \
-	m_bInActionCallback = true; \
-	ResetPluginActionResult(); \
+	ActionCallbackFrame callbackFrame(Continue(), m_actionCallback, m_returnedActionReason); \
 	IPluginFunction* pCallback = m_pFactory->GetCallback( CBaseNPCPluginActionFactory::CallbackType::typeName ); \
 	if (pCallback && pCallback->IsRunnable()) { \
 		pCallback->PushCell(PtrToPawnAddress(this)); pCallback->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
@@ -26,8 +25,7 @@ ActionResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##__VA_A
 #define ENDACTIONCALLBACK() \
 		pCallback->Execute(nullptr); \
 	} \
-	m_bInActionCallback = false; \
-	return m_pluginActionResult; \
+	return callbackFrame.Finish(); \
 }
 
 #define BEGINQUERYCALLBACK(funcName, ...) \
@@ -45,8 +43,7 @@ QueryResultType CBaseNPCPluginAction:: funcName ( const INextBot *me, ##__VA_ARG
 
 #define BEGINEVENTCALLBACKEX(funcName, typeName, ...) \
 EventDesiredResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##__VA_ARGS__) {	\
-	m_inEventCallback++; \
-	ResetPluginEventResult(); \
+	EventCallbackFrame callbackFrame(TryContinue(RESULT_NONE), m_eventCallback, m_returnedEventReason); \
 	IPluginFunction* pCallback = m_pFactory->GetEventCallback( CBaseNPCPluginActionFactory::EventResponderCallbackType::typeName ); \
 	if (pCallback && pCallback->IsRunnable()) { \
 		pCallback->PushCell(PtrToPawnAddress(this)); \
@@ -63,14 +60,12 @@ EventDesiredResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##
 #define ENDEVENTCALLBACK() \
 		pCallback->Execute(nullptr); \
 	}	\
-	m_inEventCallback--; \
-	return m_pluginEventResult; \
+	return callbackFrame.Finish(); \
 }
 
 #define ENDEVENTCALLBACK_NOEXECUTE() \
 	}	\
-	m_inEventCallback--; \
-	return m_pluginEventResult; \
+	return callbackFrame.Finish(); \
 }
 
 // https://github.com/alliedmodders/sourcemod/blob/6928d21bcf746920b0f2f54e2c28b34097a66be2/core/smn_keyvalues.h#L42
@@ -95,12 +90,6 @@ CBaseNPCPluginAction::CBaseNPCPluginAction(CBaseNPCPluginActionFactory* pFactory
 	size_t dataSize = pFactory->GetActionDataSize();
 	m_pData = (dataSize > 0) ? calloc(1, dataSize) : nullptr;
 
-	ResetPluginActionResult();
-	ResetPluginEventResult();
-
-	m_bInActionCallback = false;
-	m_inEventCallback = 0;
-
 	pFactory->OnActionCreated(this);
 }
 
@@ -122,64 +111,51 @@ const char* CBaseNPCPluginAction::GetName() const
 	return m_pFactory->GetName();
 }
 
-void CBaseNPCPluginAction::ResetPluginActionResult()
-{
-	m_pluginActionResult.m_action = nullptr;
-	m_pluginActionResult.m_reason = nullptr;
-	m_pluginActionResult.m_type = CONTINUE;
-}
-
 void CBaseNPCPluginAction::PluginContinue()
 {
-	m_pluginActionResult = Continue();
+	m_actionCallback->result = Continue();
+	m_actionCallback->reason.Keep(nullptr);
 }
 
 void CBaseNPCPluginAction::PluginChangeTo( Action< INextBot > *action, const char *reason )
 {
-	m_pluginActionResult = ChangeTo(action, m_reasonStorage.Keep(reason));
+	m_actionCallback->result = ChangeTo(action, m_actionCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginSuspendFor( Action< INextBot > *action, const char *reason )
 {
-	m_pluginActionResult = SuspendFor(action, m_reasonStorage.Keep(reason));
+	m_actionCallback->result = SuspendFor(action, m_actionCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginDone( const char *reason )
 {
-	m_pluginActionResult = Done(m_reasonStorage.Keep(reason));
-}
-
-void CBaseNPCPluginAction::ResetPluginEventResult()
-{
-	m_pluginEventResult.m_priority = RESULT_NONE;
-	m_pluginEventResult.m_action = nullptr;
-	m_pluginEventResult.m_reason = nullptr;
-	m_pluginEventResult.m_type = CONTINUE;
+	m_actionCallback->result = Done(m_actionCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryContinue( EventResultPriorityType priority ) 
 { 
-	m_pluginEventResult = TryContinue(priority); 
+	m_eventCallback->result = TryContinue(priority);
+	m_eventCallback->reason.Keep(nullptr);
 }
 
 void CBaseNPCPluginAction::PluginTryChangeTo( Action< INextBot > *action, EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryChangeTo(action, priority, m_reasonStorage.Keep(reason));
+	m_eventCallback->result = TryChangeTo(action, priority, m_eventCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTrySuspendFor( Action< INextBot > *action, EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TrySuspendFor(action, priority, m_reasonStorage.Keep(reason));
+	m_eventCallback->result = TrySuspendFor(action, priority, m_eventCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryDone( EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryDone(priority, m_reasonStorage.Keep(reason));
+	m_eventCallback->result = TryDone(priority, m_eventCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryToSustain( EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryToSustain(priority, m_reasonStorage.Keep(reason));
+	m_eventCallback->result = TryToSustain(priority, m_eventCallback->reason.Keep(reason));
 }
 
 // Actions

@@ -22,16 +22,16 @@ class CBaseNPCPluginAction : public Action <INextBot>
 public:
 	
 private:
-	ActionResult< INextBot > m_pluginActionResult;
-	EventDesiredResult< INextBot > m_pluginEventResult;
-	CBaseNPCActionReasons m_reasonStorage;
+	using ActionCallbackFrame = CBaseNPCActionResultFrame<ActionResult<INextBot>>;
+	using EventCallbackFrame = CBaseNPCActionResultFrame<EventDesiredResult<INextBot>>;
+	ActionCallbackFrame* m_actionCallback = nullptr;
+	EventCallbackFrame* m_eventCallback = nullptr;
+	CBaseNPCActionReasons m_returnedActionReason;
+	CBaseNPCActionReasons m_returnedEventReason;
 
 	void * m_pData;
 
 	CBaseNPCPluginActionFactory * m_pFactory;
-
-	bool m_bInActionCallback;
-	int m_inEventCallback;
 
 public:
     CBaseNPCPluginAction(CBaseNPCPluginActionFactory * pFactory);
@@ -43,14 +43,13 @@ public:
 
 	CBaseNPCPluginActionFactory * GetFactory() const { return m_pFactory; };
 
-	void ResetPluginActionResult();
 	void PluginContinue();
 	void PluginChangeTo( Action< INextBot > *action, const char *reason );
 	void PluginSuspendFor( Action< INextBot > *action, const char *reason );
 	void PluginDone( const char *reason );
 
-	bool IsInActionCallback() const { return m_bInActionCallback; }
-	bool IsInEventCallback() const { return m_inEventCallback > 0; }
+	bool IsInActionCallback() const { return m_actionCallback != nullptr; }
+	bool IsInEventCallback() const { return m_eventCallback != nullptr; }
 
 	virtual ActionResult< INextBot > OnStart( INextBot *me, Action< INextBot > *prevAction ) override final;
 	virtual ActionResult< INextBot > Update( INextBot *me, float interval ) override final;
@@ -74,7 +73,6 @@ public:
 															   const CKnownEntity *threat1, 
 															   const CKnownEntity *threat2 ) const override final;
 
-	void ResetPluginEventResult();
 	void PluginTryContinue( EventResultPriorityType priority );
 	void PluginTryChangeTo( Action< INextBot > *action, EventResultPriorityType priority, const char *reason );
 	void PluginTrySuspendFor( Action< INextBot > *action, EventResultPriorityType priority, const char *reason );

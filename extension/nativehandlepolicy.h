@@ -10,7 +10,11 @@ class CBaseNPCNativeHandlePolicy
 {
 public:
   using Identity = SourceMod::IdentityToken_t*;
-  void Register(void* object, Identity owner, void* scope = nullptr) { objects_[object] = {owner, scope, {}}; }
+  // Creation on behalf of a plugin does not make the creating consumer its
+  // lifetime owner. Only a scope belonging to the actual owner may revoke it.
+  void Register(void* object, Identity owner, Identity creator, void* scope = nullptr) {
+    objects_[object] = {owner, owner && owner == creator ? scope : nullptr, {}};
+  }
   void Forget(void* object) { objects_.erase(object); }
   bool Owns(void* object, Identity owner) const {
     auto found = objects_.find(object);
@@ -40,6 +44,7 @@ public:
     }
   }
   void RemoveScope(void* scope) {
+    if (!scope) return;
     for (auto& object : objects_) {
       object.second.grantees.erase(scope);
       if (object.second.scope == scope) {

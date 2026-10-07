@@ -60,7 +60,8 @@ public:
   virtual const char* GetNativeName(size_t index) const = 0;
   virtual bool HasNative(const char* name) const = 0;
   // One consumer per (extension identity, side). Extension handles and gamedata
-  // can be passed directly; newly created CBaseNPC handles are tracked here.
+  // can be passed directly; newly created consumer-owned handles are tracked
+  // here. Handles explicitly created for a SourcePawn plugin remain its own.
   virtual ICBaseNPCConsumer* CreateConsumer(IExtension* owner, char* error,
                                            size_t maxlength) = 0;
   // Call from SDK_OnUnload, before destroying callback objects. Refused during

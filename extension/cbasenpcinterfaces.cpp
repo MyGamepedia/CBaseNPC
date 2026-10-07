@@ -311,12 +311,16 @@ Handle_t CBaseNPCTrackNativeHandle(IPluginContext* context, Handle_t handle, Ide
   auto identity = owner ? owner : context->GetIdentity();
   for (auto consumer : consumers) if (&consumer->context == context) {
     creator = consumer;
-    consumer->handles.push_back({handle, identity}); break;
+    // A factory explicitly created for a SourcePawn plugin belongs to that
+    // plugin, including cleanup. Detach this consumer's callbacks on release,
+    // but do not free the plugin's handle or revoke its mutation authority.
+    if (identity == context->GetIdentity()) consumer->handles.push_back({handle, identity});
+    break;
   }
   void* object = nullptr;
   HandleSecurity security(identity, myself->GetIdentity());
   if (handlesys->ReadHandle(handle, 0, &security, &object) == HandleError_None)
-    handlePolicy.Register(object, identity, creator);
+    handlePolicy.Register(object, identity, context->GetIdentity(), creator);
   return handle;
 }
 void CBaseNPCCheckNativeHandleAccess(IPluginContext* context, void* object, bool mutating)

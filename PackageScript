@@ -57,7 +57,10 @@ CopyDirContent('gamedata', 'addons/sourcemod/gamedata')
 CopyFiles('extension/shared', 'public/cbasenpc', [
   'ICBaseNPCTools.h', 'ICBaseNPCShared.h', 'ICBaseNPCServer.h', 'ICBaseNPCClient.h'
 ])
-CopyFiles('tests', 'public/cbasenpc', ['CPP_INTERFACES.md', 'cpp_api_consumer.cpp'])
+# Optional developer examples must not make a release checkout depend on tests.
+cpp_examples = ['CPP_INTERFACES.md', 'cpp_api_consumer.cpp']
+if all(os.path.isfile(os.path.join(builder.sourcePath, 'tests', name)) for name in cpp_examples):
+  CopyFiles('tests', 'public/cbasenpc', cpp_examples)
 
 #shutil.make_archive(builder.buildFolder, 'gztar', builder.buildFolder)
 # Ship test sources alongside disabled test binaries; no second extension.

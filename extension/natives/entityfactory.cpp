@@ -130,6 +130,9 @@ cell_t SetInitialActionFactory(IPluginContext* context, const cell_t* params) {
 		if (!action) {
 			return context->ThrowNativeError("Invalid action factory");
 		}
+		// Attaching another owner's behavior requires the same explicit grant
+		// as configuring that action factory directly.
+		CBaseNPCCheckNativeHandleAccess(context, action, true);
 	}
 
 	factory->SetBaseNPCInitialActionFactory(action);
