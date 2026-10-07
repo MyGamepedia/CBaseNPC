@@ -7,11 +7,12 @@ namespace factory {
 
 inline CBaseNPCPluginActionFactory* Get(IPluginContext* context, const cell_t param) {
 	HandleSecurity security;
-	security.pOwner = nullptr;
+	security.pOwner = context->GetIdentity();
 	security.pIdentity = myself->GetIdentity();
 	Handle_t hndlObject = static_cast<Handle_t>(param);
 	CBaseNPCPluginActionFactory* factory = nullptr;
 	READHANDLE(hndlObject, BaseNPCPluginActionFactory, factory);
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 	return factory;
 }
 

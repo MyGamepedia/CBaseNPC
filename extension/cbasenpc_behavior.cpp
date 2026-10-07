@@ -136,17 +136,17 @@ void CBaseNPCPluginAction::PluginContinue()
 
 void CBaseNPCPluginAction::PluginChangeTo( Action< INextBot > *action, const char *reason )
 {
-	m_pluginActionResult = ChangeTo(action, reason);
+	m_pluginActionResult = ChangeTo(action, m_reasonStorage.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginSuspendFor( Action< INextBot > *action, const char *reason )
 {
-	m_pluginActionResult = SuspendFor(action, reason);
+	m_pluginActionResult = SuspendFor(action, m_reasonStorage.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginDone( const char *reason )
 {
-	m_pluginActionResult = Done(reason);
+	m_pluginActionResult = Done(m_reasonStorage.Keep(reason));
 }
 
 void CBaseNPCPluginAction::ResetPluginEventResult()
@@ -164,22 +164,22 @@ void CBaseNPCPluginAction::PluginTryContinue( EventResultPriorityType priority )
 
 void CBaseNPCPluginAction::PluginTryChangeTo( Action< INextBot > *action, EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryChangeTo(action, priority, reason); 
+	m_pluginEventResult = TryChangeTo(action, priority, m_reasonStorage.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTrySuspendFor( Action< INextBot > *action, EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TrySuspendFor(action, priority, reason); 
+	m_pluginEventResult = TrySuspendFor(action, priority, m_reasonStorage.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryDone( EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryDone(priority, reason); 
+	m_pluginEventResult = TryDone(priority, m_reasonStorage.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryToSustain( EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryToSustain(priority, reason); 
+	m_pluginEventResult = TryToSustain(priority, m_reasonStorage.Keep(reason));
 }
 
 // Actions
@@ -594,6 +594,7 @@ void CBaseNPCPluginActionFactories::SDK_OnUnload()
 
 void CBaseNPCPluginActionFactories::OnHandleDestroy( HandleType_t type, void * object )
 {
+	CBaseNPCForgetNativeHandleObject(object);
 	CBaseNPCPluginActionFactory* factory = (CBaseNPCPluginActionFactory*)object;
 	delete factory;
 }

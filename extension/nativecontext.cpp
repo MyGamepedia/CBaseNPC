@@ -74,7 +74,7 @@ public:
     : context_(context), id_(id), target_(target) {}
   bool Invoke(const sp::CallArgs& args, cell_t* result) override {
     if (result) *result = 0;
-    if (!IsRunnable()) return true;
+    if (!IsRunnable()) return false;
     // Engine callbacks also use Invoke directly, outside InvokeNative. Never
     // let an extension exception cross the engine/SourceHook boundary.
     try {
@@ -195,7 +195,6 @@ int CBaseNPCNativeContext::LocalToString(cell_t local, char** out)
   auto& buffer = FindBuffer(local, 1, offset);
   *out = reinterpret_cast<char*>(buffer.storage.data()) + offset;
   if (!std::memchr(*out, '\0', buffer.bytes - offset)) ThrowNativeError("Input string has no terminator");
-  if (!buffer.copyback) *out = const_cast<char*>(strings_.emplace(*out).first->c_str());
   return SP_ERROR_NONE;
 }
 int CBaseNPCNativeContext::LocalToStringNULL(cell_t local, char** out)

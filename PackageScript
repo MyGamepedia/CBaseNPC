@@ -17,7 +17,8 @@ folder_list = [
   'addons/sourcemod/scripting/include/cbasenpc/nextbot',
   'addons/sourcemod/scripting/include/cbasenpc/nextbot/path',
   'addons/sourcemod/gamedata',
-  'addons/sourcemod/plugins/disabled'
+  'addons/sourcemod/plugins/disabled',
+  'public/cbasenpc'
 ]
 
 # Create the distribution folder hierarchy.
@@ -53,6 +54,10 @@ CopyDirContent('scripting/include/cbasenpc/bms', 'addons/sourcemod/scripting/inc
 CopyDirContent('scripting/include/cbasenpc/nextbot', 'addons/sourcemod/scripting/include/cbasenpc/nextbot')
 CopyDirContent('scripting/include/cbasenpc/nextbot/path', 'addons/sourcemod/scripting/include/cbasenpc/nextbot/path')
 CopyDirContent('gamedata', 'addons/sourcemod/gamedata')
+CopyFiles('extension/shared', 'public/cbasenpc', [
+  'ICBaseNPCTools.h', 'ICBaseNPCShared.h', 'ICBaseNPCServer.h', 'ICBaseNPCClient.h'
+])
+CopyFiles('tests', 'public/cbasenpc', ['CPP_INTERFACES.md', 'cpp_api_consumer.cpp'])
 
 #shutil.make_archive(builder.buildFolder, 'gztar', builder.buildFolder)
 # Ship test sources alongside disabled test binaries; no second extension.

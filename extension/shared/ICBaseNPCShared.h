@@ -41,6 +41,13 @@ public:
   // x64, raw addresses on x86. Client Address natives use the .inc Address ABI.
   virtual cell_t ToAddress(const void* address) const = 0;
   virtual void* FromAddress(cell_t address) const = 0;
+  // Only the original object owner can explicitly share mutation rights.
+  // Reads/derivation remain public; a grant does not transfer handle ownership
+  // or permit CloseHandle. Rights disappear when either consumer unloads.
+  virtual bool GrantHandleMutation(Handle_t handle, ICBaseNPCConsumer* recipient,
+                                   char* error, size_t maxlength) = 0;
+  virtual bool RevokeHandleMutation(Handle_t handle, ICBaseNPCConsumer* recipient,
+                                    char* error, size_t maxlength) = 0;
 protected:
   virtual ~ICBaseNPCConsumer() = default;
 };
@@ -59,7 +66,7 @@ public:
   // Call from SDK_OnUnload, before destroying callback objects. Refused during
   // an active invocation of this consumer. Disables callbacks first, then frees
   // handles; published network metadata remains immutable/process-lifetime.
-  // Detached adapters/retained strings are tombstones until process exit, since
+  // Detached adapters are tombstones until process exit, since
   // callbacks may have been attached to objects owned by another consumer.
   virtual bool ReleaseConsumer(ICBaseNPCConsumer* consumer, char* error,
                                 size_t maxlength) = 0;

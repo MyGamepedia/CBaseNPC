@@ -13,6 +13,9 @@
 
 Handle_t CBaseNPCTrackNativeHandle(IPluginContext* context, Handle_t handle, IdentityToken_t* owner = nullptr);
 IPlugin* CBaseNPCGetOwningPlugin(IPluginContext* context);
+void CBaseNPCCheckNativeHandleAccess(IPluginContext* context, void* object, bool mutating);
+void CBaseNPCForgetNativeHandleObject(void* object);
+void CBaseNPCRevokeNativeHandleIdentity(IdentityToken_t* identity);
 	
 #define GETGAMEDATAOFFSET(name, var) \
 	if(!g_pGameConf->GetOffset(name, &var) || var == -1) { snprintf(error, maxlength, "FAILED TO GET GAMEDATA OFFSET FOR %s", name); return false; } \
@@ -25,6 +28,7 @@ IPlugin* CBaseNPCGetOwningPlugin(IPluginContext* context);
 			void OnHandleDestroy(HandleType_t type, void *object) \
 			{ \
 				name *p##name = (name *)object; \
+				CBaseNPCForgetNativeHandleObject(object); \
 				delete p##name; \
 			} \
 	}; \
@@ -38,6 +42,7 @@ IPlugin* CBaseNPCGetOwningPlugin(IPluginContext* context);
 			void OnHandleDestroy(HandleType_t type, void *object) \
 			{ \
 				obj *p##name = (obj *)object; \
+				CBaseNPCForgetNativeHandleObject(object); \
 				delete p##name; \
 			} \
 	}; \
@@ -51,6 +56,7 @@ IPlugin* CBaseNPCGetOwningPlugin(IPluginContext* context);
 			void OnHandleDestroy(HandleType_t type, void *object) \
 			{ \
 				objtype *p##name = (objtype *)object; \
+				CBaseNPCForgetNativeHandleObject(object); \
 				delete p##name; \
 			} \
 	}; \

@@ -8,6 +8,7 @@
 
 #include "sourcesdk/nav_mesh.h"
 #include "toolsnav_mesh.h"
+#include "pathcostcallback.h"
 
 namespace natives::nav {
 
@@ -170,16 +171,16 @@ public:
 	{
 		if (m_pFunc && m_pFunc->IsRunnable())
 		{
-			cell_t result = sp_ftoc(0.0);
-			m_pFunc->PushCell(PtrToPawnAddress(area));
-			m_pFunc->PushCell(PtrToPawnAddress(fromArea));
-			m_pFunc->PushCell(PtrToPawnAddress(ladder));
-			m_pFunc->PushCell(gamehelpers->EntityToBCompatRef((CBaseEntity*)elevator));
-			m_pFunc->PushFloat(length);
-			m_pFunc->Execute(&result);
-			return sp_ctof(result);
+			sp::CallArgs args;
+			args.PushCell(PtrToPawnAddress(area));
+			args.PushCell(PtrToPawnAddress(fromArea));
+			args.PushCell(PtrToPawnAddress(ladder));
+			args.PushCell(gamehelpers->EntityToBCompatRef((CBaseEntity*)elevator));
+			args.PushFloat(length);
+			float cost = 0.0f;
+			if (CBaseNPCTryPathCost(m_pFunc, args, cost)) return cost;
 		}
-		else {
+		{
 			if ( fromArea == nullptr ) {
 				// first area in path, no cost
 				return 0.0f;

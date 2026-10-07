@@ -6,7 +6,7 @@ namespace natives::entityfactory {
 
 inline CPluginEntityFactory* Get(IPluginContext* context, const cell_t param) {
 	HandleSecurity security;
-	security.pOwner = nullptr;
+	security.pOwner = context->GetIdentity();
 	security.pIdentity = myself->GetIdentity();
 	Handle_t hndlObject = static_cast<Handle_t>(param);
 	CPluginEntityFactory *factory = nullptr;
@@ -19,6 +19,7 @@ inline CPluginEntityFactory* Get(IPluginContext* context, const cell_t param, bo
 	if (!factory) {
 		return nullptr;
 	}
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 
 	if (factory->m_bInstalled != shouldBeInstalled) {
 		if (shouldBeInstalled) {
@@ -324,6 +325,7 @@ cell_t DefineServerClass(IPluginContext* context, const cell_t* params)
 {
 	auto factory = Get(context, params[1]);
 	if (!factory) return 0;
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 	char *name, *table, *base;
 	context->LocalToString(params[2], &name);
 	context->LocalToString(params[3], &table);
@@ -446,6 +448,7 @@ cell_t DefineInputFunc(IPluginContext* context, const cell_t* params) {
 cell_t DefineOutput(IPluginContext* context, const cell_t* params) {
 	auto factory = Get(context, params[1]);
 	if (!factory) return 0;
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 	if (factory->IsNetworkLayoutFrozen()) return context->ThrowNativeError("Factory layout is frozen by the network schema; restart required");
 	
 	char* keyName;

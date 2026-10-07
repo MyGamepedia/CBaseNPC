@@ -7,6 +7,18 @@
 #include <stdexcept>
 #include <set>
 
+// Early-state replay and the deferred notification may overlap through reentry.
+// Mark before invocation, so each initialization subscription is delivered once.
+class CBaseNPCInitializationDelivery
+{
+public:
+  bool Mark(cell_t callback) { return delivered_.insert(callback).second; }
+  void Remove(cell_t callback) { delivered_.erase(callback); }
+  void Clear() { delivered_.clear(); }
+private:
+  std::set<cell_t> delivered_;
+};
+
 // A narrow adapter for CBaseNPC's existing native entry points. It never runs
 // bytecode, impersonates a SourceMod plugin, or enters the SourcePawn VM.
 class CBaseNPCNativeContext final : public SourcePawn::IPluginRuntime
@@ -87,10 +99,6 @@ private:
   SourceMod::IdentityToken_t* owner_;
   Frame* frame_ = nullptr;
   std::vector<std::unique_ptr<Function>> functions_;
-  // A few server natives retain reason/name pointers past the immediate call
-  // (notably NextBot action results). Match plugin memory lifetime for input
-  // strings, instead of handing them a pointer into a temporary call frame.
-  std::set<std::string> strings_;
   cell_t nullVector_[3] = {}, nullString_ = 0;
   unsigned active_ = 0;
   int error_ = SP_ERROR_NONE;

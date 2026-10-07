@@ -425,6 +425,7 @@ int CPluginEntityFactories::GetInstalledFactoryHandles(Handle_t* pHandleArray, s
 
 void CPluginEntityFactories::OnPluginUnloaded( IPlugin* plugin )
 {
+	CBaseNPCRevokeNativeHandleIdentity(plugin->GetIdentity());
 	// Uninstall the factories before Handles start to get freed during
 	// plugin unload. This is to resolve errors that may occur when entities
 	// are removed during plugin unload, and plugin tries to free handles
@@ -471,6 +472,7 @@ void CPluginEntityFactories::OnPluginUnloaded( IPlugin* plugin )
 
 void CPluginEntityFactories::OnHandleDestroy( HandleType_t type, void * object )
 {
+	CBaseNPCForgetNativeHandleObject(object);
 	CPluginEntityFactory* factory = (CPluginEntityFactory*)object;
 	factory->Uninstall();
 	factory->DestroyDataDesc();

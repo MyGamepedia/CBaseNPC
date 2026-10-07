@@ -16,6 +16,7 @@ bool CPluginClientEntityFactories::Init(char* error, size_t maxlength)
 }
 void CPluginClientEntityFactories::OnHandleDestroy(HandleType_t, void* object)
 {
+ CBaseNPCForgetNativeHandleObject(object);
  auto factory = static_cast<CPluginClientEntityFactory*>(object);
  factory->Detach();
  // Published runtime classes retain declarations, never plugin functions.
@@ -24,7 +25,10 @@ void CPluginClientEntityFactories::OnHandleDestroy(HandleType_t, void* object)
  delete factory;
 }
 void CPluginClientEntityFactories::OnPluginUnloaded(IPlugin* plugin)
-{ for (auto factory : factories_) if (factory->plugin == plugin) factory->Detach(); }
+{
+ CBaseNPCRevokeNativeHandleIdentity(plugin->GetIdentity());
+ for (auto factory : factories_) if (factory->plugin == plugin) factory->Detach();
+}
 void CPluginClientEntityFactories::Shutdown()
 {
  for (auto factory : factories_) factory->Detach();
@@ -45,6 +49,7 @@ CPluginClientEntityFactory* Get(IPluginContext* context, cell_t handle)
  CPluginClientEntityFactory* factory = nullptr;
  auto error = handlesys->ReadHandle(handle, g_PluginClientEntityFactories.Type(), &security, reinterpret_cast<void**>(&factory));
  if (error != HandleError_None) { context->ThrowNativeError("Invalid client factory handle (%d)", error); return nullptr; }
+ CBaseNPCCheckNativeHandleAccess(context, factory, true);
  if (factory->installed || factory->frozen) { context->ThrowNativeError("Client factory is installed/frozen; restart required to change it"); return nullptr; }
  return factory;
 }

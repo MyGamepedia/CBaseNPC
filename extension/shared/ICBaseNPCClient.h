@@ -2,7 +2,7 @@
 #define CBASENPC_CLIENT_API_H
 #include "ICBaseNPCShared.h"
 #define SMINTERFACE_CBASENPC_CLIENT_NAME "ICBaseNPCClient"
-#define SMINTERFACE_CBASENPC_CLIENT_VERSION 1
+#define SMINTERFACE_CBASENPC_CLIENT_VERSION 2
 namespace SourceMod
 {
 class ICBaseNPCClientEntityListener
@@ -19,6 +19,7 @@ class ICBaseNPCClient : public SMInterface, public ICBaseNPCNativeAPI
 public:
   const char* GetInterfaceName() override { return SMINTERFACE_CBASENPC_CLIENT_NAME; }
   unsigned int GetInterfaceVersion() override { return SMINTERFACE_CBASENPC_CLIENT_VERSION; }
+  bool IsVersionCompatible(unsigned int version) override { return version == 1 || version == 2; }
   // Published on every supported server build. On dedicated/TF2 IsAvailable
   // is false; identity calls return their invalid/empty result. BMS client
   // declarations remain usable on dedicated as with SourcePawn.

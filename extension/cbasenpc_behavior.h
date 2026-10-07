@@ -5,6 +5,7 @@
 #include "NextBotBehavior.h"
 #include "cbasenpc_internal.h"
 #include "idatamapcontainer.h"
+#include "actionreasons.h"
 
 #include <sh_stack.h>
 
@@ -23,6 +24,7 @@ public:
 private:
 	ActionResult< INextBot > m_pluginActionResult;
 	EventDesiredResult< INextBot > m_pluginEventResult;
+	CBaseNPCActionReasons m_reasonStorage;
 
 	void * m_pData;
 

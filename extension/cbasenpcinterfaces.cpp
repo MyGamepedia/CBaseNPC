@@ -1,5 +1,6 @@
 #include "cbasenpcinterfaces.h"
 #include "nativecontext.h"
+#include "nativehandlepolicy.h"
 #include "shared/ICBaseNPCServer.h"
 #include "shared/ICBaseNPCClient.h"
 #include "extension.h"
@@ -38,6 +39,7 @@ bool ForwardOnSide(const char* name, Side side)
 }
 struct Consumer;
 std::vector<Consumer*> consumers;
+CBaseNPCNativeHandlePolicy handlePolicy;
 bool running = false;
 
 struct Consumer final : ICBaseNPCConsumer
@@ -49,6 +51,7 @@ struct Consumer final : ICBaseNPCConsumer
   struct OwnedHandle { Handle_t handle; IdentityToken_t* owner; };
   std::vector<OwnedHandle> handles;
   std::vector<std::pair<std::string, cell_t>> subscriptions;
+  CBaseNPCInitializationDelivery initializedCallbacks;
   bool InvokeNative(const char* name, const sp::CallArgs& args, cell_t* result,
                      char* error, size_t maxlength) override {
     if (result) *result = 0;
@@ -92,13 +95,24 @@ struct Consumer final : ICBaseNPCConsumer
       auto function = context.GetFunctionById(callback);
       if (!function || !function->IsRunnable()) return Error(error, maxlength, "Callback is null or disabled");
       std::pair<std::string, cell_t> entry{name, callback};
-      if (std::find(subscriptions.begin(), subscriptions.end(), entry) == subscriptions.end())
+      if (std::find(subscriptions.begin(), subscriptions.end(), entry) == subscriptions.end()) {
         subscriptions.push_back(std::move(entry));
+        // Initialization may precede interface publication during SDK_OnLoad.
+        // Replay only this new subscription, never all existing listeners.
+        if (!std::strcmp(name, "OnCBaseNPCInitialized") && m_bInitialized && initializedCallbacks.Mark(callback)) {
+          cell_t result = 0;
+          if (!context.InvokeCallback(callback, sp::CallArgs(), &result)) {
+            UnsubscribeForward(name, callback);
+            return Error(error, maxlength, "Initialization callback failed during state replay");
+          }
+        }
+      }
       return true;
     } catch (const std::exception& ex) { return Error(error, maxlength, ex.what()); }
   }
   void UnsubscribeForward(const char* name, cell_t callback) override {
     if (!name) return;
+    if (!std::strcmp(name, "OnCBaseNPCInitialized")) initializedCallbacks.Remove(callback);
     std::pair<std::string, cell_t> entry{name, callback};
     subscriptions.erase(std::remove(subscriptions.begin(), subscriptions.end(), entry), subscriptions.end());
   }
@@ -119,10 +133,32 @@ struct Consumer final : ICBaseNPCConsumer
   }
   cell_t ToAddress(const void* address) const override { return PtrToPawnAddress(address); }
   void* FromAddress(cell_t address) const override { return PawnAddressToPtr(address); }
+  bool SetHandleGrant(Handle_t handle, ICBaseNPCConsumer* recipient, bool grant,
+                       char* error, size_t maxlength) {
+    auto found = std::find_if(consumers.begin(), consumers.end(), [recipient](Consumer* c) { return c == recipient; });
+    if (closing || !running || found == consumers.end() || (*found)->closing || (*found)->side != side)
+      return Error(error, maxlength, "An active recipient consumer on the same side is required");
+    HandleSecurity security(GetOwnerIdentity(), myself->GetIdentity());
+    void* object = nullptr;
+    auto status = handlesys->ReadHandle(handle, 0, &security, &object);
+    if (status != HandleError_None) return Error(error, maxlength, HandleErrorToString(status));
+    // ReadHandle's default identity-only access is not an owner check.
+    bool success = grant ? handlePolicy.Grant(object, GetOwnerIdentity(), *found)
+                         : handlePolicy.Revoke(object, GetOwnerIdentity(), *found);
+    return success || Error(error, maxlength, "Only the original CBaseNPC object owner can grant or revoke mutation rights");
+  }
+  bool GrantHandleMutation(Handle_t handle, ICBaseNPCConsumer* recipient, char* error, size_t maxlength) override {
+    return SetHandleGrant(handle, recipient, true, error, maxlength);
+  }
+  bool RevokeHandleMutation(Handle_t handle, ICBaseNPCConsumer* recipient, char* error, size_t maxlength) override {
+    return SetHandleGrant(handle, recipient, false, error, maxlength);
+  }
   void Close() {
     closing = true;
     context.Deactivate();
     subscriptions.clear();
+    initializedCallbacks.Clear();
+    handlePolicy.RemoveScope(this);
     // Metadata copies have no extension callbacks. A published schema must
     // never be reverted when an extension consumer releases its declarations.
     if (side == Side::Server) g_CBaseNPCServerClassManager.RemoveDTPropBitsPatches(GetOwnerIdentity());
@@ -139,9 +175,9 @@ void RetireConsumer(Consumer* consumer)
   consumer->Close();
   // A consumer may attach its callback to somebody else's locomotion/action
   // factory, or its input delegate to a shared datamap. We cannot free those
-  // objects on consumer unload. Keep detached adapters and retained reason
-  // strings alive as process-lifetime tombstones; no consumer extension code
-  // or owned handles remain. Never reclaim/reuse these adapter addresses.
+  // objects on consumer unload. Keep detached adapters alive as process-lifetime
+  // tombstones; no consumer extension code or owned handles remain. Never
+  // reclaim/reuse these adapter addresses.
   static auto* retired = new std::vector<std::unique_ptr<Consumer>>;
   retired->emplace_back(consumer);
 }
@@ -270,11 +306,32 @@ void CBaseNPCShutdownInterfaces()
 }
 Handle_t CBaseNPCTrackNativeHandle(IPluginContext* context, Handle_t handle, IdentityToken_t* owner)
 {
-  if (handle) for (auto consumer : consumers) if (&consumer->context == context) {
-    consumer->handles.push_back({handle, owner ? owner : context->GetIdentity()}); break;
+  if (!handle) return handle;
+  Consumer* creator = nullptr;
+  auto identity = owner ? owner : context->GetIdentity();
+  for (auto consumer : consumers) if (&consumer->context == context) {
+    creator = consumer;
+    consumer->handles.push_back({handle, identity}); break;
   }
+  void* object = nullptr;
+  HandleSecurity security(identity, myself->GetIdentity());
+  if (handlesys->ReadHandle(handle, 0, &security, &object) == HandleError_None)
+    handlePolicy.Register(object, identity, creator);
   return handle;
 }
+void CBaseNPCCheckNativeHandleAccess(IPluginContext* context, void* object, bool mutating)
+{
+  if (!mutating) return;
+  // Keep established SourcePawn sharing semantics. C++ consumers must own the
+  // object or hold a grant from its original owner, including cloned handles.
+  for (auto consumer : consumers) if (&consumer->context == context) {
+    if (!handlePolicy.CanMutate(object, context->GetIdentity(), consumer))
+      context->ThrowNativeError("Cannot mutate a foreign CBaseNPC handle object without an owner grant");
+    return;
+  }
+}
+void CBaseNPCForgetNativeHandleObject(void* object) { handlePolicy.Forget(object); }
+void CBaseNPCRevokeNativeHandleIdentity(IdentityToken_t* identity) { handlePolicy.RemoveIdentity(identity); }
 IPlugin* CBaseNPCGetOwningPlugin(IPluginContext* context)
 {
   // The public SourceMod adapter calls GetBaseRuntime() and then downcasts to
@@ -289,6 +346,7 @@ cell_t CBaseNPCDispatchForward(const char* name, const sp::CallArgs& args, cell_
     const auto subscriptions = consumer->subscriptions;
     for (const auto& entry : subscriptions) {
       if (entry.first != name || std::find(consumer->subscriptions.begin(), consumer->subscriptions.end(), entry) == consumer->subscriptions.end()) continue;
+      if (!std::strcmp(name, "OnCBaseNPCInitialized") && !consumer->initializedCallbacks.Mark(entry.second)) continue;
 #if SOURCE_ENGINE == SE_BMS
       if (!std::strcmp(name, "OnEntityCreatedClient") &&
           !g_ClientEntityManager.ResolveClientEntityRef(args.argv[0].u.value)) return initial;

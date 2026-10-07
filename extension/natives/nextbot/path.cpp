@@ -1,6 +1,7 @@
 #include "path.hpp"
 #include "path/chase.hpp"
 #include "path/follower.hpp"
+#include "pathcostcallback.h"
 
 namespace natives::nextbot::path {
 
@@ -11,7 +12,18 @@ float SMPathFollowerCost::operator()(CNavArea* area, CNavArea* fromArea, const C
 	if (fromArea == nullptr) {
 		return 0.0f;
 	} else {
-		if (!m_pFunc) {
+		if (m_pFunc && m_pFunc->IsRunnable()) {
+			sp::CallArgs args;
+			args.PushCell(PtrToPawnAddress(m_bot));
+			args.PushCell(PtrToPawnAddress(area));
+			args.PushCell(PtrToPawnAddress(fromArea));
+			args.PushCell(PtrToPawnAddress(ladder));
+			args.PushCell(gamehelpers->EntityToBCompatRef((CBaseEntity*)elevator));
+			args.PushFloat(length);
+			float cost = 0.0f;
+			if (CBaseNPCTryPathCost(m_pFunc, args, cost)) return cost;
+		}
+		{
 			ILocomotion* mover = m_bot->GetLocomotionInterface();
 			
 			if (!mover->IsAreaTraversable(area)) {
@@ -43,16 +55,6 @@ float SMPathFollowerCost::operator()(CNavArea* area, CNavArea* fromArea, const C
 			return dist + fromArea->GetCostSoFar();
 		}
 	
-		cell_t cost = sp_ftoc(0.0);
-		m_pFunc->PushCell(PtrToPawnAddress(m_bot));
-		m_pFunc->PushCell(PtrToPawnAddress(area));
-		m_pFunc->PushCell(PtrToPawnAddress(fromArea));
-		m_pFunc->PushCell(PtrToPawnAddress(ladder));
-		m_pFunc->PushCell(gamehelpers->EntityToBCompatRef((CBaseEntity *)elevator));
-		m_pFunc->PushFloat(length);
-		m_pFunc->Execute(&cost);
-		
-		return sp_ctof(cost);
 	}
 }
 
