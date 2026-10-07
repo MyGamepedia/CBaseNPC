@@ -73,7 +73,8 @@ public:
   Function(CBaseNPCNativeContext& context, funcid_t id, SourceMod::ICBaseNPCCallback* target)
     : context_(context), id_(id), target_(target) {}
   bool Invoke(const sp::CallArgs& args, cell_t* result) override {
-    if (result) *result = 0;
+    // Failure must preserve the caller's default (e.g. ANSWER_UNDEFINED).
+    // Publish the return cell and copyback buffers only after successful Invoke.
     if (!IsRunnable()) return false;
     // Engine callbacks also use Invoke directly, outside InvokeNative. Never
     // let an extension exception cross the engine/SourceHook boundary.
@@ -244,12 +245,21 @@ void CBaseNPCNativeContext::ReportErrorVA(const char* fmt, va_list ap)
     va_list ap; va_start(ap, format); \
     try { ReportErrorVA(format, ap); } catch (...) { va_end(ap); throw; } \
   }
+#if defined(_MSC_VER) && !defined(__clang__)
+// The virtual SourcePawn ABI requires cell_t returns, but these C++ adapter
+// implementations always throw. MSVC warns about the required non-void type.
+#pragma warning(push)
+#pragma warning(disable: 4646)
+#endif
 CBASENPC_ERROR_METHOD(cell_t, ThrowNativeError, (const char* fmt, ...), fmt)
 CBASENPC_ERROR_METHOD(cell_t, ThrowNativeErrorEx, (int, const char* fmt, ...), fmt)
 CBASENPC_ERROR_METHOD(void, ReportError, (const char* fmt, ...), fmt)
 CBASENPC_ERROR_METHOD(void, ReportFatalError, (const char* fmt, ...), fmt)
 CBASENPC_ERROR_METHOD(cell_t, BlamePluginError, (IPluginFunction*, const char* fmt, ...), fmt)
 #undef CBASENPC_ERROR_METHOD
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#endif
 void CBaseNPCNativeContext::ReportErrorNumber(int code) { ThrowNativeError("Native error %d", code); }
 bool CBaseNPCNativeContext::HeapAlloc2dArray(unsigned int, unsigned int, cell_t*, const cell_t*)
 { ThrowNativeError("VM heap allocation is unavailable in a C++ consumer"); }

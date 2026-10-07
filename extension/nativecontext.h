@@ -1,6 +1,7 @@
 #ifndef CBASENPC_NATIVE_CONTEXT_H
 #define CBASENPC_NATIVE_CONTEXT_H
 #include "shared/ICBaseNPCShared.h"
+#include "nativeactivity.h"
 #include <memory>
 #include <vector>
 #include <string>
@@ -47,8 +48,8 @@ public:
   void Deactivate();
   bool InvokeCallback(cell_t id, const sp::CallArgs& args, cell_t* result);
   unsigned ActiveCalls() const { return active_; }
-  void EnterCall() { ++active_; }
-  void LeaveCall() { --active_; }
+  void EnterCall() { ++active_; CBaseNPCNativeActivity::Enter(); }
+  void LeaveCall() { CBaseNPCNativeActivity::Leave(); --active_; }
   bool Int64Address() const { return sizeof(void*) > sizeof(cell_t); }
 
   int GetPubvarByIndex(uint32_t, sp_pubvar_t**) override { return SP_ERROR_NOT_FOUND; }
@@ -66,8 +67,8 @@ public:
   int LocalToString(cell_t local, char** out) override;
   int StringToLocal(cell_t local, size_t bytes, const char* source) override;
   int StringToLocalUTF8(cell_t local, size_t bytes, const char* source, size_t* written) override;
-  cell_t ThrowNativeErrorEx(int code, const char* fmt, ...) override;
-  cell_t ThrowNativeError(const char* fmt, ...) override;
+  [[noreturn]] cell_t ThrowNativeErrorEx(int code, const char* fmt, ...) override;
+  [[noreturn]] cell_t ThrowNativeError(const char* fmt, ...) override;
   cell_t* GetNullRef(SourcePawn::SP_NULL_TYPE type) override;
   int LocalToStringNULL(cell_t local, char** out) override;
   bool IsInExec() override { return active_ != 0; }
@@ -79,7 +80,7 @@ public:
   [[noreturn]] void ReportFatalError(const char* fmt, ...) override;
   [[noreturn]] void ReportFatalErrorVA(const char* fmt, va_list ap) override { ReportErrorVA(fmt, ap); }
   [[noreturn]] void ReportErrorNumber(int code) override;
-  cell_t BlamePluginError(SourcePawn::IPluginFunction*, const char* fmt, ...) override;
+  [[noreturn]] cell_t BlamePluginError(SourcePawn::IPluginFunction*, const char* fmt, ...) override;
   SourcePawn::IFrameIterator* CreateFrameIterator() override { return nullptr; }
   void DestroyFrameIterator(SourcePawn::IFrameIterator*) override {}
   bool HeapAlloc2dArray(unsigned int, unsigned int, cell_t*, const cell_t*) override;

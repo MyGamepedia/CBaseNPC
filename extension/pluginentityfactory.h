@@ -88,6 +88,7 @@ public:
 	void OnFactoryDestroyed( CPluginEntityFactory* pFactory );
 	void OnFactoryInstall( CPluginEntityFactory* pFactory );
 	void OnFactoryUninstall( CPluginEntityFactory* pFactory );
+	void DetachActionFactory( CBaseNPCPluginActionFactory* pFactory );
 
 	PluginFactoryEntityRecord_t* FindRecord( CBaseEntity* pEntity, bool create=false );
 	void RemoveRecord( CBaseEntity* pEntity );

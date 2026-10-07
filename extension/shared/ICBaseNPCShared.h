@@ -65,7 +65,8 @@ public:
   virtual ICBaseNPCConsumer* CreateConsumer(IExtension* owner, char* error,
                                            size_t maxlength) = 0;
   // Call from SDK_OnUnload, before destroying callback objects. Refused during
-  // an active invocation of this consumer. Disables callbacks first, then frees
+  // any active adapter invocation or consumer handle cleanup (including peers
+  // using granted objects). Disables callbacks first, then frees
   // handles; published network metadata remains immutable/process-lifetime.
   // Detached adapters are tombstones until process exit, since
   // callbacks may have been attached to objects owned by another consumer.

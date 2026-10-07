@@ -117,9 +117,11 @@ struct Consumer final : ICBaseNPCConsumer
     subscriptions.erase(std::remove(subscriptions.begin(), subscriptions.end(), entry), subscriptions.end());
   }
   bool CloseHandle(Handle_t handle, char* error, size_t maxlength) override {
-    if (context.ActiveCalls()) return Error(error, maxlength, "Cannot close a consumer handle during its invocation");
+    if (CBaseNPCNativeActivity::IsActive())
+      return Error(error, maxlength, "Cannot close consumer handles during an adapter invocation or cleanup");
     auto found = std::find_if(handles.begin(), handles.end(), [handle](const OwnedHandle& owned) { return owned.handle == handle; });
     if (found == handles.end()) return Error(error, maxlength, "Handle was not created by this consumer");
+    CBaseNPCNativeActivity::Scope cleanupScope;
     HandleSecurity security(found->owner, myself->GetIdentity());
     auto status = handlesys->FreeHandle(handle, &security);
     if (status != HandleError_None) return Error(error, maxlength, HandleErrorToString(status));
@@ -154,6 +156,7 @@ struct Consumer final : ICBaseNPCConsumer
     return SetHandleGrant(handle, recipient, false, error, maxlength);
   }
   void Close() {
+    CBaseNPCNativeActivity::Scope cleanupScope;
     closing = true;
     context.Deactivate();
     subscriptions.clear();
@@ -216,7 +219,8 @@ public:
     if (found == consumers.end() || (*found)->side != side)
       return Error(error, maxlength, "Consumer does not belong to this interface");
     auto owned = *found;
-    if (owned->context.ActiveCalls()) return Error(error, maxlength, "Cannot release a consumer during its invocation");
+    if (CBaseNPCNativeActivity::IsActive())
+      return Error(error, maxlength, "Cannot release consumers during an adapter invocation or cleanup");
     consumers.erase(found);
     RetireConsumer(owned);
     return true;

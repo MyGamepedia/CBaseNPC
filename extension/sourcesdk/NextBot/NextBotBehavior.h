@@ -6,6 +6,8 @@
 #include "NextBotContextualQueryInterface.h"
 #include "NextBotDebug.h"
 #include "../../actionreasons.h"
+#include <set>
+#include <vector>
 #include <util.h>
 #include <tier0/vprof.h>
 
@@ -302,6 +304,30 @@ public:
 		return m_name;
 	}
 
+	// Ownership exists before OnStart sets GetActor(). Include suspended/child
+	// actions, pending event targets and actions queued for deferred deletion.
+	// This nonvirtual helper adds no fields or vtable entries to the engine ABI.
+	bool ContainsAction( const Action< Actor > *target ) const
+	{
+		if ( !target ) return false;
+		std::vector<const Action< Actor > *> pending;
+		std::set<const Action< Actor > *> visited;
+		if ( m_action ) pending.push_back( m_action );
+		for ( int i = 0; i < m_deadActionVector.Count(); ++i )
+			if ( m_deadActionVector[i] ) pending.push_back( m_deadActionVector[i] );
+		while ( !pending.empty() )
+		{
+			const auto action = pending.back();
+			pending.pop_back();
+			if ( action == target ) return true;
+			if ( !visited.insert( action ).second ) continue;
+			if ( action->m_child ) pending.push_back( action->m_child );
+			if ( action->m_buriedUnderMe ) pending.push_back( action->m_buriedUnderMe );
+			if ( action->m_eventResult.m_action ) pending.push_back( action->m_eventResult.m_action );
+		}
+		return false;
+	}
+
 	// INextBotEventResponder propagation ----------------------------------------------------------------------
 	virtual INextBotEventResponder *FirstContainedResponder( void ) const
 	{
@@ -586,6 +612,9 @@ private:
 template < typename Actor >
 class Action : public INextBotEventResponder, public IContextualQuery
 {
+#if defined(CBASENPC_BEHAVIOR_TESTS)
+	friend struct CBaseNPCBehaviorTestAccess;
+#endif
 public:
 	DECLARE_CLASS( Action, INextBotEventResponder );
 	
@@ -983,6 +1012,14 @@ public:
 	Action< Actor > *GetActionCoveringMe( void ) const		// return Action just "above" us that will resume to us when it finishes
 	{
 		return m_coveringMe;
+	}
+	// Factory retirement may destroy an unattached action which another action
+	// has queued as an event target. Cancel that request before its pointer dies.
+	void DetachPendingAction( const Action< Actor > *target )
+	{
+		if ( m_eventResult.m_action != target ) return;
+		CBaseNPCActionReasons::ClearPending( this );
+		m_eventResult = TryContinue( RESULT_NONE );
 	}
 private:
 	/**
@@ -1955,6 +1992,3 @@ void Action< Actor >::PrintStateToConsole( void ) const
 
 
 #endif // _BEHAVIOR_ENGINE_H_
-
-
-
