@@ -1,7 +1,9 @@
 #include "plugincliententityfactory.h"
+#include "cbasenpcinterfaces.h"
 #include "sourcesdk/cbasenpcserverclass.h"
 #include <algorithm>
 #include <cstdio>
+#include <memory>
 #include <tier1/strtools.h>
 
 CPluginClientEntityFactories g_PluginClientEntityFactories;
@@ -15,6 +17,7 @@ bool CPluginClientEntityFactories::Init(char* error, size_t maxlength)
 }
 void CPluginClientEntityFactories::OnHandleDestroy(HandleType_t, void* object)
 {
+ CBaseNPCForgetNativeHandleObject(object);
  auto factory = static_cast<CPluginClientEntityFactory*>(object);
  factory->Detach();
  // Published runtime classes retain declarations, never plugin functions.
@@ -23,7 +26,10 @@ void CPluginClientEntityFactories::OnHandleDestroy(HandleType_t, void* object)
  delete factory;
 }
 void CPluginClientEntityFactories::OnPluginUnloaded(IPlugin* plugin)
-{ for (auto factory : factories_) if (factory->plugin == plugin) factory->Detach(); }
+{
+ CBaseNPCRevokeNativeHandleIdentity(plugin->GetIdentity());
+ for (auto factory : factories_) if (factory->plugin == plugin) factory->Detach();
+}
 void CPluginClientEntityFactories::Shutdown()
 {
  for (auto factory : factories_) factory->Detach();
@@ -44,6 +50,7 @@ CPluginClientEntityFactory* Get(IPluginContext* context, cell_t handle)
  CPluginClientEntityFactory* factory = nullptr;
  auto error = handlesys->ReadHandle(handle, g_PluginClientEntityFactories.Type(), &security, reinterpret_cast<void**>(&factory));
  if (error != HandleError_None) { context->ThrowNativeError("Invalid client factory handle (%d)", error); return nullptr; }
+ CBaseNPCCheckNativeHandleAccess(context, factory, true);
  if (factory->installed || factory->frozen) { context->ThrowNativeError("Client factory is installed/frozen; restart required to change it"); return nullptr; }
  return factory;
 }
@@ -57,14 +64,28 @@ bool Name(IPluginContext* context, cell_t arg, std::string& target)
 cell_t New(IPluginContext* context, const cell_t* params)
 {
  if (!Editable(context)) return 0;
- auto factory = new CPluginClientEntityFactory;
- if (!Name(context, params[1], factory->classname)) { delete factory; return 0; }
- factory->plugin = plsys->FindPluginByContext(context);
- factory->postConstructor = context->GetFunctionById(params[2]);
- factory->onRemove = context->GetFunctionById(params[3]);
- auto handle = handlesys->CreateHandle(g_PluginClientEntityFactories.Type(), factory, context->GetIdentity(), myself->GetIdentity(), nullptr);
- if (!handle) { delete factory; return context->ThrowNativeError("Could not create client factory handle"); }
- g_PluginClientEntityFactories.Add(factory); return handle;
+ // Validation can throw in an extension consumer. Do it before allocation,
+ // then use RAII until the handle system accepts ownership of the object.
+ std::string classname;
+ if (!Name(context, params[1], classname)) return 0;
+ auto postConstructor = context->GetFunctionById(params[2]);
+ auto onRemove = context->GetFunctionById(params[3]);
+ std::unique_ptr<CPluginClientEntityFactory> factory(new CPluginClientEntityFactory);
+ factory->classname = std::move(classname);
+ factory->plugin = CBaseNPCGetOwningPlugin(context);
+ factory->postConstructor = postConstructor;
+ factory->onRemove = onRemove;
+ auto handle = handlesys->CreateHandle(g_PluginClientEntityFactories.Type(), factory.get(), context->GetIdentity(), myself->GetIdentity(), nullptr);
+ if (!handle) return context->ThrowNativeError("Could not create client factory handle");
+ auto cleanup = [context, handle](void*) {
+   HandleSecurity security(context->GetIdentity(), myself->GetIdentity());
+   handlesys->FreeHandle(handle, &security);
+ };
+ std::unique_ptr<void, decltype(cleanup)> handleGuard(factory.release(), cleanup);
+ g_PluginClientEntityFactories.Add(static_cast<CPluginClientEntityFactory*>(handleGuard.get()));
+ auto tracked = CBaseNPCTrackNativeHandle(context, handle, context->GetIdentity());
+ handleGuard.release();
+ return tracked;
 }
 cell_t Define(IPluginContext* context, const cell_t* params)
 {

@@ -1,4 +1,6 @@
 #include "pluginentityfactory.h"
+#include "callbackbuffers.h"
+#include "cbasenpcinterfaces.h"
 #include "sourcesdk/cbasenpcnetworkschema.h"
 #include "entityfactorydictionary.h"
 #include "cbasenpc_internal.h"
@@ -383,16 +385,41 @@ void CPluginEntityFactories::OnFactoryDestroyed( CPluginEntityFactory* pFactory 
 
 void CPluginEntityFactories::OnFactoryInstall(CPluginEntityFactory * pFactory)
 {
+	const std::string classname = pFactory->m_iClassname;
+	sp::CallArgs args;
+	args.PushString(classname.c_str());
+	args.PushCell(pFactory->m_Handle);
 	m_fwdInstalledFactory->PushString(pFactory->m_iClassname.c_str());
 	m_fwdInstalledFactory->PushCell(pFactory->m_Handle);
 	m_fwdInstalledFactory->Execute();
+	CBaseNPCDispatchForward("CEntityFactory_OnInstalled", args);
 }
 
 void CPluginEntityFactories::OnFactoryUninstall(CPluginEntityFactory * pFactory)
 {
+	const std::string classname = pFactory->m_iClassname;
+	sp::CallArgs args;
+	args.PushString(classname.c_str());
+	args.PushCell(pFactory->m_Handle);
 	m_fwdUninstalledFactory->PushString(pFactory->m_iClassname.c_str());
 	m_fwdUninstalledFactory->PushCell(pFactory->m_Handle);
 	m_fwdUninstalledFactory->Execute();
+	CBaseNPCDispatchForward("CEntityFactory_OnUninstalled", args);
+}
+
+void CPluginEntityFactories::DetachActionFactory(CBaseNPCPluginActionFactory* actionFactory)
+{
+	// No callbacks here: sever every borrowed declaration/record reference before
+	// resetting behaviors can enter consumer code or create another entity.
+	for (int i = 0; i < m_Factories.Count(); ++i)
+	{
+		auto factory = m_Factories[i];
+		if (factory->GetBaseNPCInitialActionFactory() == actionFactory)
+			factory->SetBaseNPCInitialActionFactory(nullptr);
+	}
+	for (auto& entry : m_Records)
+		if (entry.second->m_pInitialActionFactory == actionFactory)
+			entry.second->m_pInitialActionFactory = nullptr;
 }
 
 int CPluginEntityFactories::GetInstalledFactoryHandles(Handle_t* pHandleArray, size_t arraySize)
@@ -414,6 +441,7 @@ int CPluginEntityFactories::GetInstalledFactoryHandles(Handle_t* pHandleArray, s
 
 void CPluginEntityFactories::OnPluginUnloaded( IPlugin* plugin )
 {
+	CBaseNPCRevokeNativeHandleIdentity(plugin->GetIdentity());
 	// Uninstall the factories before Handles start to get freed during
 	// plugin unload. This is to resolve errors that may occur when entities
 	// are removed during plugin unload, and plugin tries to free handles
@@ -460,6 +488,7 @@ void CPluginEntityFactories::OnPluginUnloaded( IPlugin* plugin )
 
 void CPluginEntityFactories::OnHandleDestroy( HandleType_t type, void * object )
 {
+	CBaseNPCForgetNativeHandleObject(object);
 	CPluginEntityFactory* factory = (CPluginEntityFactory*)object;
 	factory->Uninstall();
 	factory->DestroyDataDesc();
@@ -614,7 +643,7 @@ CPluginEntityFactory* CPluginEntityFactory::ToPluginEntityFactory( IEntityFactor
 	return g_pPluginEntityFactories->ToPluginEntityFactory( pFactory );
 }
 
-CPluginEntityFactory::CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor, IPluginFunction *onRemove ) :
+CPluginEntityFactory::CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor, IPluginFunction *onRemove, IdentityToken_t* owner ) :
 	IEntityDataMapContainer(),
 	m_iClassname(classname),
 	m_pPlugin(plugin),
@@ -626,7 +655,7 @@ CPluginEntityFactory::CPluginEntityFactory( IPlugin* plugin, const char* classna
 {
 	m_Derive.m_DeriveFrom = DERIVETYPE_NONE;
 
-	m_Handle = handlesys->CreateHandle( g_pPluginEntityFactories->GetFactoryType(), this, plugin->GetIdentity(), myself->GetIdentity(), nullptr );
+	m_Handle = handlesys->CreateHandle( g_pPluginEntityFactories->GetFactoryType(), this, plugin ? plugin->GetIdentity() : owner, myself->GetIdentity(), nullptr );
 
 	m_bIsAbstract = false;
 	m_pBaseFactory = nullptr;
@@ -1202,6 +1231,7 @@ public:
 		m_pCallback->PushCell(gamehelpers->EntityToBCompatRef(data.pCaller));
 
 		variant_t &value = data.value;
+		CBaseNPCCallbackBuffers callbackBuffers;
 
 		switch (m_fieldType)
 		{
@@ -1213,14 +1243,12 @@ public:
 				break;
 			case FIELD_COLOR32:
 			{
-				cell_t color[4] = { 
+				callbackBuffers.PushArray(m_pCallback, {
 					value.rgbaVal.r,
 					value.rgbaVal.g,
 					value.rgbaVal.b,
 					value.rgbaVal.a
-				};
-
-				m_pCallback->PushArray(color, 4);
+				});
 				break;
 			}
 			case FIELD_FLOAT:
@@ -1231,12 +1259,11 @@ public:
 				break;
 			case FIELD_VECTOR:
 			{
-				cell_t vec[3] = {
+				callbackBuffers.PushArray(m_pCallback, {
 					sp_ftoc(value.vecVal[0]),
 					sp_ftoc(value.vecVal[1]),
 					sp_ftoc(value.vecVal[2])
-				};
-				m_pCallback->PushArray(vec, 3);
+				});
 				break;
 			}	
 			case FIELD_VOID:

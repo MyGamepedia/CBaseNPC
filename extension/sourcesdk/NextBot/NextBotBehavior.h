@@ -5,6 +5,9 @@
 #include "NextBotEventResponderInterface.h"
 #include "NextBotContextualQueryInterface.h"
 #include "NextBotDebug.h"
+#include "../../actionreasons.h"
+#include <set>
+#include <vector>
 #include <util.h>
 #include <tier0/vprof.h>
 
@@ -241,6 +244,7 @@ public:
 	 */
 	void Update( Actor *me, float interval )
 	{
+		CBaseNPCActionReasons::Scope reasonScope;
 		if ( me == NULL || IsEmpty() )
 		{
 			return;
@@ -267,6 +271,7 @@ public:
 	 */
 	void Resume( Actor *me )
 	{
+		CBaseNPCActionReasons::Scope reasonScope;
 		if ( me == NULL || IsEmpty() )
 		{
 			return;
@@ -297,6 +302,30 @@ public:
 	const char *GetName( void ) const
 	{
 		return m_name;
+	}
+
+	// Ownership exists before OnStart sets GetActor(). Include suspended/child
+	// actions, pending event targets and actions queued for deferred deletion.
+	// This nonvirtual helper adds no fields or vtable entries to the engine ABI.
+	bool ContainsAction( const Action< Actor > *target ) const
+	{
+		if ( !target ) return false;
+		std::vector<const Action< Actor > *> pending;
+		std::set<const Action< Actor > *> visited;
+		if ( m_action ) pending.push_back( m_action );
+		for ( int i = 0; i < m_deadActionVector.Count(); ++i )
+			if ( m_deadActionVector[i] ) pending.push_back( m_deadActionVector[i] );
+		while ( !pending.empty() )
+		{
+			const auto action = pending.back();
+			pending.pop_back();
+			if ( action == target ) return true;
+			if ( !visited.insert( action ).second ) continue;
+			if ( action->m_child ) pending.push_back( action->m_child );
+			if ( action->m_buriedUnderMe ) pending.push_back( action->m_buriedUnderMe );
+			if ( action->m_eventResult.m_action ) pending.push_back( action->m_eventResult.m_action );
+		}
+		return false;
 	}
 
 	// INextBotEventResponder propagation ----------------------------------------------------------------------
@@ -583,6 +612,9 @@ private:
 template < typename Actor >
 class Action : public INextBotEventResponder, public IContextualQuery
 {
+#if defined(CBASENPC_BEHAVIOR_TESTS)
+	friend struct CBaseNPCBehaviorTestAccess;
+#endif
 public:
 	DECLARE_CLASS( Action, INextBotEventResponder );
 	
@@ -742,6 +774,7 @@ private:
 															\
 			Action< Actor > *_action = this;				\
 			EventDesiredResult< Actor > _result;			\
+			CBaseNPCActionReasons _eventReason;		\
 															\
 			while( _action )								\
 			{												\
@@ -750,6 +783,7 @@ private:
 					m_actor->DebugConColorMsg( NEXTBOT_EVENTS, Color( 100, 100, 100, 255 ), "%3.2f: %s:%s: %s received EVENT %s\n", gpGlobals->curtime, m_actor->GetDebugIdentifier(), m_behavior->GetName(), _action->GetFullName(), #METHOD );	\
 				}											\
 				_result = _action->METHOD( m_actor );	\
+				_result.m_reason = _eventReason.Keep( _result.m_reason ); \
 				if ( !_result.IsContinue() )				\
 					break;									\
 				_action = _action->GetActionBuriedUnderMe();		\
@@ -780,6 +814,7 @@ private:
 															\
 			Action< Actor > *_action = this;				\
 			EventDesiredResult< Actor > _result;			\
+			CBaseNPCActionReasons _eventReason;		\
 															\
 			while( _action )								\
 			{												\
@@ -788,6 +823,7 @@ private:
 					m_actor->DebugConColorMsg( NEXTBOT_EVENTS, Color( 100, 100, 100, 255 ), "%3.2f: %s:%s: %s received EVENT %s\n", gpGlobals->curtime, m_actor->GetDebugIdentifier(), m_behavior->GetName(), _action->GetFullName(), #METHOD );	\
 				}											\
 				_result = _action->METHOD( m_actor, ARG1 );		\
+				_result.m_reason = _eventReason.Keep( _result.m_reason ); \
 				if ( !_result.IsContinue() )				\
 					break;									\
 				_action = _action->GetActionBuriedUnderMe();		\
@@ -818,6 +854,7 @@ private:
 															\
 			Action< Actor > *_action = this;				\
 			EventDesiredResult< Actor > _result;			\
+			CBaseNPCActionReasons _eventReason;		\
 															\
 			while( _action )								\
 			{												\
@@ -826,6 +863,7 @@ private:
 					m_actor->DebugConColorMsg( NEXTBOT_EVENTS, Color( 100, 100, 100, 255 ), "%3.2f: %s:%s: %s received EVENT %s\n", gpGlobals->curtime, m_actor->GetDebugIdentifier(), m_behavior->GetName(), _action->GetFullName(), #METHOD );	\
 				}											\
 				_result = _action->METHOD( m_actor, ARG1, ARG2 );		\
+				_result.m_reason = _eventReason.Keep( _result.m_reason ); \
 				if ( !_result.IsContinue() )				\
 					break;									\
 				_action = _action->GetActionBuriedUnderMe();				\
@@ -856,6 +894,7 @@ private:
 															\
 			Action< Actor > *_action = this;				\
 			EventDesiredResult< Actor > _result;			\
+			CBaseNPCActionReasons _eventReason;		\
 															\
 			while( _action )								\
 			{												\
@@ -864,6 +903,7 @@ private:
 					m_actor->DebugConColorMsg( NEXTBOT_EVENTS, Color( 100, 100, 100, 255 ), "%3.2f: %s:%s: %s received EVENT %s\n", gpGlobals->curtime, m_actor->GetDebugIdentifier(), m_behavior->GetName(), _action->GetFullName(), #METHOD );	\
 				}											\
 				_result = _action->METHOD( m_actor, ARG1, ARG2, ARG3 );		\
+				_result.m_reason = _eventReason.Keep( _result.m_reason ); \
 				if ( !_result.IsContinue() )				\
 					break;									\
 				_action = _action->GetActionBuriedUnderMe();				\
@@ -973,6 +1013,14 @@ public:
 	{
 		return m_coveringMe;
 	}
+	// Factory retirement may destroy an unattached action which another action
+	// has queued as an event target. Cancel that request before its pointer dies.
+	void DetachPendingAction( const Action< Actor > *target )
+	{
+		if ( m_eventResult.m_action != target ) return;
+		CBaseNPCActionReasons::ClearPending( this );
+		m_eventResult = TryContinue( RESULT_NONE );
+	}
 private:
 	/**
 	 * If any Action buried underneath me has either exited
@@ -1004,6 +1052,7 @@ private:
 			ActionResult< Actor > result( m_eventResult.m_type, m_eventResult.m_action, m_eventResult.m_reason );
 
 			// clear event result in case this change is a suspend and we later resume this action
+			CBaseNPCActionReasons::ConsumePending( this );
 			m_eventResult = TryContinue( RESULT_NONE );
 
 			return result;
@@ -1019,6 +1068,7 @@ private:
 				ActionResult< Actor > result( under->m_eventResult.m_type, under->m_eventResult.m_action, under->m_eventResult.m_reason );
 
 				// clear event result in case this change is a suspend and we later resume this action
+				CBaseNPCActionReasons::ConsumePending( under );
 				under->m_eventResult = TryContinue( RESULT_NONE );
 
 				return result;
@@ -1048,6 +1098,10 @@ private:
 	 */
 	void StorePendingEventResult( const EventDesiredResult< Actor > &result, const char *eventName )
 	{
+		// Deleting a replaced/unused action may invoke nested consumer code.
+		// Snapshot before that; the accepted pending result gets its own slot.
+		CBaseNPCActionReasons pendingReason;
+		pendingReason.Keep( result.m_reason );
 		if ( result.IsContinue() )
 		{
 			return;
@@ -1073,6 +1127,7 @@ private:
 			// do custom event collision handling. If we keep the first event at this priority and discard
 			// subsequent events (original behavior) there is no way to predict future collision resolutions (MSB).
 			m_eventResult = result;
+			m_eventResult.m_reason = CBaseNPCActionReasons::StorePending( this, pendingReason.Pin() );
 		}
 		else
 		{
@@ -1159,6 +1214,7 @@ Action< Actor >::~Action()
 	{
 		delete m_eventResult.m_action;
 	}
+	CBaseNPCActionReasons::ClearPending( this );
 }
 
 
@@ -1192,6 +1248,7 @@ ActionResult< Actor > Action< Actor >::SuspendFor( Action< Actor > *action, cons
 {
 	// clear any pending transitions requested by events, or this SuspendFor will
 	// immediately be out of scope
+	CBaseNPCActionReasons::ClearPending( this );
 	m_eventResult = TryContinue( RESULT_NONE );
 
 	return ActionResult< Actor >( SUSPEND_FOR, action, reason );
@@ -1518,6 +1575,10 @@ ActionResult< Actor > Action< Actor >::InvokeOnResume( Actor *me, Behavior< Acto
 template < typename Actor >
 Action< Actor > *Action< Actor >::ApplyResult( Actor *me, Behavior< Actor > *behavior, ActionResult< Actor > result )
 {
+	// DONE logs its reason after OnEnd, and transitions invoke nested actions.
+	// Own the copy until this application (including recursive ones) is done.
+	CBaseNPCActionReasons appliedReason;
+	result.m_reason = appliedReason.Keep( result.m_reason );
 	Action< Actor > *newAction = result.m_action;
 
 	switch( result.m_type )
@@ -1565,6 +1626,8 @@ Action< Actor > *Action< Actor >::ApplyResult( Actor *me, Behavior< Actor > *beh
 
 			// start the new Action
 			ActionResult< Actor > startResult = newAction->InvokeOnStart( me, behavior, this, this->m_buriedUnderMe );
+			CBaseNPCActionReasons startReason;
+			startResult.m_reason = startReason.Keep( startResult.m_reason );
 
 			// discard ended action
 			if ( this != newAction )
@@ -1619,6 +1682,8 @@ Action< Actor > *Action< Actor >::ApplyResult( Actor *me, Behavior< Actor > *beh
 
 			// begin the interrupting Action.
 			ActionResult< Actor > startResult = newAction->InvokeOnStart( me, behavior, topAction, topAction );
+			CBaseNPCActionReasons startReason;
+			startResult.m_reason = startReason.Keep( startResult.m_reason );
 
 			// debug display
 			if ( me->IsDebugging( NEXTBOT_BEHAVIOR ) )
@@ -1674,6 +1739,8 @@ Action< Actor > *Action< Actor >::ApplyResult( Actor *me, Behavior< Actor > *beh
 
 			// resume uncovered action
 			ActionResult< Actor > resumeResult = resumedAction->InvokeOnResume( me, behavior, this );
+			CBaseNPCActionReasons resumeReason;
+			resumeResult.m_reason = resumeReason.Keep( resumeResult.m_reason );
 
 			// debug display
 			if ( me->IsDebugging( NEXTBOT_BEHAVIOR ) )
@@ -1925,8 +1992,3 @@ void Action< Actor >::PrintStateToConsole( void ) const
 
 
 #endif // _BEHAVIOR_ENGINE_H_
-
-
-
-
-

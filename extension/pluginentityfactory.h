@@ -88,6 +88,7 @@ public:
 	void OnFactoryDestroyed( CPluginEntityFactory* pFactory );
 	void OnFactoryInstall( CPluginEntityFactory* pFactory );
 	void OnFactoryUninstall( CPluginEntityFactory* pFactory );
+	void DetachActionFactory( CBaseNPCPluginActionFactory* pFactory );
 
 	PluginFactoryEntityRecord_t* FindRecord( CBaseEntity* pEntity, bool create=false );
 	void RemoveRecord( CBaseEntity* pEntity );
@@ -174,7 +175,7 @@ public:
 
 	Handle_t m_Handle;
 
-	CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor=nullptr, IPluginFunction *onRemove=nullptr );
+	CPluginEntityFactory( IPlugin* plugin, const char* classname, IPluginFunction *postConstructor=nullptr, IPluginFunction *onRemove=nullptr, IdentityToken_t* owner=nullptr );
 	virtual ~CPluginEntityFactory();
 
 	bool Install();

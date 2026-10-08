@@ -1,6 +1,9 @@
 
 #include "cbasenpc_behavior.h"
+#include "callbackbuffers.h"
+#include "pluginentityfactory.h"
 #include <set>
+#include <vector>
 
 #define CBPUSHCELL(cell) pCallback->PushCell((cell_t)(cell));
 #define CBPUSHFLOAT(fl) pCallback->PushCell(sp_ftoc(fl));
@@ -8,15 +11,14 @@
 #define CBPUSHSTRING(str) pCallback->PushString(str);
 #define CBPUSHVECTOR(vec) \
 	{ \
-		Vector vecBuffer; vecBuffer = vec; cell_t vecCells[3]; \
-		vecCells[0] = sp_ftoc(vecBuffer[0]); vecCells[1] = sp_ftoc(vecBuffer[1]); vecCells[2] = sp_ftoc(vecBuffer[2]);\
-		pCallback->PushArray(vecCells, 3); \
+		const Vector vecBuffer = vec; \
+		callbackBuffers.PushArray(pCallback, {sp_ftoc(vecBuffer[0]), sp_ftoc(vecBuffer[1]), sp_ftoc(vecBuffer[2])}); \
 	}
 
 #define BEGINACTIONCALLBACKEX(funcName, typeName, ...) \
 ActionResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##__VA_ARGS__) { \
-	m_bInActionCallback = true; \
-	ResetPluginActionResult(); \
+	CBaseNPCCallbackBuffers callbackBuffers; \
+	ActionCallbackFrame callbackFrame(Continue(), m_actionCallback, m_returnedActionReason); \
 	IPluginFunction* pCallback = m_pFactory->GetCallback( CBaseNPCPluginActionFactory::CallbackType::typeName ); \
 	if (pCallback && pCallback->IsRunnable()) { \
 		pCallback->PushCell(PtrToPawnAddress(this)); pCallback->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
@@ -26,27 +28,28 @@ ActionResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##__VA_A
 #define ENDACTIONCALLBACK() \
 		pCallback->Execute(nullptr); \
 	} \
-	m_bInActionCallback = false; \
-	return m_pluginActionResult; \
+	return callbackFrame.Finish(); \
 }
 
 #define BEGINQUERYCALLBACK(funcName, ...) \
 QueryResultType CBaseNPCPluginAction:: funcName ( const INextBot *me, ##__VA_ARGS__) const {	\
+	CBaseNPCCallbackBuffers callbackBuffers; \
 	cell_t result = ANSWER_UNDEFINED; \
 	IPluginFunction* pCallback = m_pFactory->GetQueryCallback( CBaseNPCPluginActionFactory::QueryCallbackType::funcName ); \
 	if (pCallback && pCallback->IsRunnable()) { \
 		CBPUSHCELL(PtrToPawnAddress(this)); CBPUSHCELL(PtrToPawnAddress(me));
 
 #define ENDQUERYCALLBACK() \
-		pCallback->Execute(&result); \
+		cell_t callbackResult = result; \
+		if (pCallback->Execute(&callbackResult) == SP_ERROR_NONE) result = callbackResult; \
 	}	\
 	return (QueryResultType)result; \
 }
 
 #define BEGINEVENTCALLBACKEX(funcName, typeName, ...) \
 EventDesiredResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##__VA_ARGS__) {	\
-	m_inEventCallback++; \
-	ResetPluginEventResult(); \
+	CBaseNPCCallbackBuffers callbackBuffers; \
+	EventCallbackFrame callbackFrame(TryContinue(RESULT_NONE), m_eventCallback, m_returnedEventReason); \
 	IPluginFunction* pCallback = m_pFactory->GetEventCallback( CBaseNPCPluginActionFactory::EventResponderCallbackType::typeName ); \
 	if (pCallback && pCallback->IsRunnable()) { \
 		pCallback->PushCell(PtrToPawnAddress(this)); \
@@ -63,14 +66,12 @@ EventDesiredResult< INextBot > CBaseNPCPluginAction:: funcName (INextBot* me, ##
 #define ENDEVENTCALLBACK() \
 		pCallback->Execute(nullptr); \
 	}	\
-	m_inEventCallback--; \
-	return m_pluginEventResult; \
+	return callbackFrame.Finish(); \
 }
 
 #define ENDEVENTCALLBACK_NOEXECUTE() \
 	}	\
-	m_inEventCallback--; \
-	return m_pluginEventResult; \
+	return callbackFrame.Finish(); \
 }
 
 // https://github.com/alliedmodders/sourcemod/blob/6928d21bcf746920b0f2f54e2c28b34097a66be2/core/smn_keyvalues.h#L42
@@ -95,12 +96,6 @@ CBaseNPCPluginAction::CBaseNPCPluginAction(CBaseNPCPluginActionFactory* pFactory
 	size_t dataSize = pFactory->GetActionDataSize();
 	m_pData = (dataSize > 0) ? calloc(1, dataSize) : nullptr;
 
-	ResetPluginActionResult();
-	ResetPluginEventResult();
-
-	m_bInActionCallback = false;
-	m_inEventCallback = 0;
-
 	pFactory->OnActionCreated(this);
 }
 
@@ -122,64 +117,51 @@ const char* CBaseNPCPluginAction::GetName() const
 	return m_pFactory->GetName();
 }
 
-void CBaseNPCPluginAction::ResetPluginActionResult()
-{
-	m_pluginActionResult.m_action = nullptr;
-	m_pluginActionResult.m_reason = nullptr;
-	m_pluginActionResult.m_type = CONTINUE;
-}
-
 void CBaseNPCPluginAction::PluginContinue()
 {
-	m_pluginActionResult = Continue();
+	m_actionCallback->result = Continue();
+	m_actionCallback->reason.Keep(nullptr);
 }
 
 void CBaseNPCPluginAction::PluginChangeTo( Action< INextBot > *action, const char *reason )
 {
-	m_pluginActionResult = ChangeTo(action, reason);
+	m_actionCallback->result = ChangeTo(action, m_actionCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginSuspendFor( Action< INextBot > *action, const char *reason )
 {
-	m_pluginActionResult = SuspendFor(action, reason);
+	m_actionCallback->result = SuspendFor(action, m_actionCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginDone( const char *reason )
 {
-	m_pluginActionResult = Done(reason);
-}
-
-void CBaseNPCPluginAction::ResetPluginEventResult()
-{
-	m_pluginEventResult.m_priority = RESULT_NONE;
-	m_pluginEventResult.m_action = nullptr;
-	m_pluginEventResult.m_reason = nullptr;
-	m_pluginEventResult.m_type = CONTINUE;
+	m_actionCallback->result = Done(m_actionCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryContinue( EventResultPriorityType priority ) 
 { 
-	m_pluginEventResult = TryContinue(priority); 
+	m_eventCallback->result = TryContinue(priority);
+	m_eventCallback->reason.Keep(nullptr);
 }
 
 void CBaseNPCPluginAction::PluginTryChangeTo( Action< INextBot > *action, EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryChangeTo(action, priority, reason); 
+	m_eventCallback->result = TryChangeTo(action, priority, m_eventCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTrySuspendFor( Action< INextBot > *action, EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TrySuspendFor(action, priority, reason); 
+	m_eventCallback->result = TrySuspendFor(action, priority, m_eventCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryDone( EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryDone(priority, reason); 
+	m_eventCallback->result = TryDone(priority, m_eventCallback->reason.Keep(reason));
 }
 
 void CBaseNPCPluginAction::PluginTryToSustain( EventResultPriorityType priority, const char *reason ) 
 { 
-	m_pluginEventResult = TryToSustain(priority, reason); 
+	m_eventCallback->result = TryToSustain(priority, m_eventCallback->reason.Keep(reason));
 }
 
 // Actions
@@ -236,7 +218,8 @@ bool CBaseNPCPluginAction::IsAbleToBlockMovementOf( const INextBot *botInMotion 
 		CBPUSHCELL(PtrToPawnAddress(this))
 		CBPUSHCELL(PtrToPawnAddress(botInMotion))
 
-		pCallback->Execute(&result);
+		cell_t callbackResult = result;
+		if (pCallback->Execute(&callbackResult) == SP_ERROR_NONE) result = callbackResult;
 	}
 
 	return !!result;
@@ -521,17 +504,21 @@ CBaseNPCIntention::CBaseNPCIntention( INextBot * bot, CBaseNPCPluginActionFactor
 	: IIntention( bot ), m_pInitialActionFactory(initialActionFactory)
 {
 	m_pBehavior = nullptr;
-
+	g_pBaseNPCPluginActionFactories->OnIntentionCreated(this);
 	InitBehavior();
 }
 
 CBaseNPCIntention::~CBaseNPCIntention()
 {
+	g_pBaseNPCPluginActionFactories->OnIntentionDestroyed(this);
 	DestroyBehavior();
 }
 
 void CBaseNPCIntention::Reset()
 { 
+	if (m_bResetting) return;
+	m_bResetting = true;
+	struct Guard { bool& resetting; ~Guard() { resetting = false; } } guard{m_bResetting};
 	DestroyBehavior();
 	InitBehavior();
 }
@@ -541,6 +528,7 @@ void CBaseNPCIntention::InitBehavior()
 	if (m_pInitialActionFactory)
 	{
 		Action< INextBot > * pAction = m_pInitialActionFactory->Create();
+		if (!pAction) return; // A factory being retired cannot create new actions.
 		m_pInitialActionFactory->OnCreateInitialAction( pAction );
 		m_pBehavior = new Behavior< INextBot >( pAction );
 	}
@@ -555,8 +543,14 @@ void CBaseNPCIntention::DestroyBehavior()
 	if ( !m_pBehavior )
 		return;
 
-	delete m_pBehavior;
+	auto behavior = m_pBehavior;
 	m_pBehavior = nullptr;
+	delete behavior;
+}
+
+bool CBaseNPCIntention::UsesActionFactory(const CBaseNPCPluginActionFactory* factory) const
+{
+	return m_pInitialActionFactory == factory || factory->IsUsedBy(m_pBehavior);
 }
 
 void CBaseNPCIntention::Update()
@@ -594,6 +588,7 @@ void CBaseNPCPluginActionFactories::SDK_OnUnload()
 
 void CBaseNPCPluginActionFactories::OnHandleDestroy( HandleType_t type, void * object )
 {
+	CBaseNPCForgetNativeHandleObject(object);
 	CBaseNPCPluginActionFactory* factory = (CBaseNPCPluginActionFactory*)object;
 	delete factory;
 }
@@ -624,7 +619,42 @@ void CBaseNPCPluginActionFactories::OnFactoryDestroyed( CBaseNPCPluginActionFact
 	m_Factories.FindAndRemove( pFactory );
 }
 
-CBaseNPCPluginActionFactory::CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName ) : 
+void CBaseNPCPluginActionFactories::OnIntentionCreated(CBaseNPCIntention* intention)
+{
+	m_Intentions.insert(intention);
+}
+
+void CBaseNPCPluginActionFactories::OnIntentionDestroyed(CBaseNPCIntention* intention)
+{
+	m_Intentions.erase(intention);
+}
+
+void CBaseNPCPluginActionFactories::DetachPendingAction(Action<INextBot>* action)
+{
+	for (int i = 0; i < m_Factories.Count(); ++i)
+		for (int j = 0; j < m_Factories[i]->m_Actions.Count(); ++j)
+			m_Factories[i]->m_Actions[j]->DetachPendingAction(action);
+}
+
+void CBaseNPCPluginActionFactories::ResetIntentionsUsingFactory(CBaseNPCPluginActionFactory* factory)
+{
+	std::vector<CBaseNPCIntention*> affected;
+	for (auto intention : m_Intentions)
+	{
+		if (!intention->UsesActionFactory(factory)) continue;
+		affected.push_back(intention);
+		if (intention->m_pInitialActionFactory == factory)
+			intention->m_pInitialActionFactory = nullptr;
+	}
+	for (auto intention : affected)
+	{
+		// Reset may destroy another entity/intention. Never dereference a stale
+		// snapshot entry, and never downcast a game's stock IIntention object.
+		if (m_Intentions.count(intention)) intention->Reset();
+	}
+}
+
+CBaseNPCPluginActionFactory::CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName, IdentityToken_t* owner ) : 
 	IDataMapContainer(),
 	m_bDestroying(false),
 	m_iActionName(actionName)
@@ -633,7 +663,7 @@ CBaseNPCPluginActionFactory::CBaseNPCPluginActionFactory( IPlugin* plugin, const
 	SetDefLessFunc(m_QueryCallbacks);
 	SetDefLessFunc(m_EventCallbacks);
 
-	m_Handle = handlesys->CreateHandle( g_pBaseNPCPluginActionFactories->GetFactoryType(), this, plugin->GetIdentity(), myself->GetIdentity(), nullptr );
+	m_Handle = handlesys->CreateHandle( g_pBaseNPCPluginActionFactories->GetFactoryType(), this, plugin ? plugin->GetIdentity() : owner, myself->GetIdentity(), nullptr );
 
 	g_pBaseNPCPluginActionFactories->OnFactoryCreated( this );
 }
@@ -641,44 +671,25 @@ CBaseNPCPluginActionFactory::CBaseNPCPluginActionFactory( IPlugin* plugin, const
 CBaseNPCPluginActionFactory::~CBaseNPCPluginActionFactory()
 {
 	m_bDestroying = true;
-
-	if (m_Actions.Count() > 0)
-	{
-		// Reset any intentions using my actions. Can this potentially
-		// gimp the actors' behavior? Yeah, but at least it only happens 
-		// in dev environments, right? Right?
-
-		std::set< CBaseNPCIntention* > intentions;
-		for ( int i = 0; i < m_Actions.Count(); i++ )
-		{
-			Action< INextBot > *pAction = m_Actions[i];
-			if (!pAction) continue;
-
-			INextBot* pActor = pAction->GetActor();
-			if (!pActor) continue;
-
-			CBaseNPCIntention* pIntention = (CBaseNPCIntention*)pActor->GetIntentionInterface(); // DANGER
-			if (!pIntention) continue;
-
-			intentions.insert(pIntention);
-		}
-
-		for ( auto iter = intentions.begin(); iter != intentions.end(); iter++ )
-		{
-			CBaseNPCIntention* pIntention = *iter;
-
-			if (pIntention->m_pInitialActionFactory == this)
-			{
-				pIntention->m_pInitialActionFactory = nullptr;
-			}
-
-			pIntention->Reset();
-		}
-	}
+	g_pPluginEntityFactories->DetachActionFactory(this);
+	g_pBaseNPCPluginActionFactories->ResetIntentionsUsingFactory(this);
+	// Behaviors own attached actions (even before OnStart); the resets above
+	// destroy those first. Drain any standalone Create() results afterwards.
+	// Action destruction can also delete children/pending actions and shrink
+	// this vector, so do not iterate an index/snapshot across those deletions.
+	while (m_Actions.Count() > 0) delete m_Actions.Tail();
 
 	DestroyDataDesc();
 
 	g_pBaseNPCPluginActionFactories->OnFactoryDestroyed( this );
+}
+
+bool CBaseNPCPluginActionFactory::IsUsedBy(const Behavior<INextBot>* behavior) const
+{
+	if (!behavior) return false;
+	for (int i = 0; i < m_Actions.Count(); ++i)
+		if (behavior->ContainsAction(m_Actions[i])) return true;
+	return false;
 }
 
 IPluginFunction* CBaseNPCPluginActionFactory::GetCallback(CallbackType cbType)
@@ -743,6 +754,7 @@ void CBaseNPCPluginActionFactory::OnActionCreated(Action <INextBot>* pAction)
 void CBaseNPCPluginActionFactory::OnActionRemoved(Action <INextBot>* pAction)
 {
 	m_Actions.FindAndRemove(pAction);
+	if (m_bDestroying) g_pBaseNPCPluginActionFactories->DetachPendingAction(pAction);
 }
 
 void CBaseNPCPluginActionFactory::OnCreateInitialAction(Action <INextBot>* pAction)

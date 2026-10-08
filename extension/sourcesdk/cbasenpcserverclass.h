@@ -24,7 +24,8 @@ public:
 	const char* RegistrationError() const;
 	void BlockRegistrationForLateLoad();
 	bool RegisterDTPropBitsPatch(const char* tableName, const char* propName,
-		int bits, char* error, size_t maxlength);
+		int bits, char* error, size_t maxlength, SourceMod::IdentityToken_t* owner = nullptr);
+	void RemoveDTPropBitsPatches(SourceMod::IdentityToken_t* owner);
 	bool HasInstalledNetworkDeclarations() const;
 	ServerClass* GetCombinedHead() const;
 	ServerClass* FindStockOrCustomClass(const char* name) const;

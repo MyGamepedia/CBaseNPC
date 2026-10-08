@@ -6,7 +6,7 @@ namespace natives::entityfactory {
 
 inline CPluginEntityFactory* Get(IPluginContext* context, const cell_t param) {
 	HandleSecurity security;
-	security.pOwner = nullptr;
+	security.pOwner = context->GetIdentity();
 	security.pIdentity = myself->GetIdentity();
 	Handle_t hndlObject = static_cast<Handle_t>(param);
 	CPluginEntityFactory *factory = nullptr;
@@ -19,6 +19,7 @@ inline CPluginEntityFactory* Get(IPluginContext* context, const cell_t param, bo
 	if (!factory) {
 		return nullptr;
 	}
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 
 	if (factory->m_bInstalled != shouldBeInstalled) {
 		if (shouldBeInstalled) {
@@ -50,7 +51,7 @@ cell_t CPluginEntityFactory_Ctor(IPluginContext * context, const cell_t * params
 		return context->ThrowNativeError("Entity factory must have a classname");
 	}
 
-	IPlugin* plugin = plsys->FindPluginByContext(context);
+	IPlugin* plugin = CBaseNPCGetOwningPlugin(context);
 	IPluginFunction *postConstructor = context->GetFunctionById(params[2]);
 	IPluginFunction *onRemove = context->GetFunctionById(params[3]);
 
@@ -63,8 +64,9 @@ cell_t CPluginEntityFactory_Ctor(IPluginContext * context, const cell_t * params
 		}
 	}
 
-	CPluginEntityFactory* factory = new CPluginEntityFactory(plugin, classname, postConstructor, onRemove);
-	return factory->m_Handle;
+	CPluginEntityFactory* factory = new CPluginEntityFactory(plugin, classname, postConstructor, onRemove, context->GetIdentity());
+	if (!factory->m_Handle) { delete factory; return context->ThrowNativeError("Could not create entity factory handle"); }
+	return CBaseNPCTrackNativeHandle(context, factory->m_Handle, plugin ? plugin->GetIdentity() : context->GetIdentity());
 }
 
 cell_t GetFactoryOfEntity(IPluginContext* context, const cell_t * params) {
@@ -128,6 +130,9 @@ cell_t SetInitialActionFactory(IPluginContext* context, const cell_t* params) {
 		if (!action) {
 			return context->ThrowNativeError("Invalid action factory");
 		}
+		// Attaching another owner's behavior requires the same explicit grant
+		// as configuring that action factory directly.
+		CBaseNPCCheckNativeHandleAccess(context, action, true);
 	}
 
 	factory->SetBaseNPCInitialActionFactory(action);
@@ -323,6 +328,7 @@ cell_t DefineServerClass(IPluginContext* context, const cell_t* params)
 {
 	auto factory = Get(context, params[1]);
 	if (!factory) return 0;
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 	char *name, *table, *base;
 	context->LocalToString(params[2], &name);
 	context->LocalToString(params[3], &table);
@@ -445,6 +451,7 @@ cell_t DefineInputFunc(IPluginContext* context, const cell_t* params) {
 cell_t DefineOutput(IPluginContext* context, const cell_t* params) {
 	auto factory = Get(context, params[1]);
 	if (!factory) return 0;
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 	if (factory->IsNetworkLayoutFrozen()) return context->ThrowNativeError("Factory layout is frozen by the network schema; restart required");
 	
 	char* keyName;

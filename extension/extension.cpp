@@ -18,6 +18,7 @@
 #include "sourcesdk/basetoggle.h"
 #include "sourcesdk/funcbrush.h"
 #include "natives.hpp"
+#include "cbasenpcinterfaces.h"
 #include <ihandleentity.h>
 #include "npc_tools_internal.h"
 #include "baseentityoutput.h"
@@ -243,14 +244,12 @@ bool CBaseNPCExt::SDK_OnLoad(char* error, size_t maxlength, bool late) {
 	sharesys->AddDependency(myself, "sdkhooks.ext", true, true);
 	sharesys->RegisterLibrary(myself, "cbasenpc");
 	sharesys->AddInterface(myself, g_pCBaseNPCTools);
-#if SOURCE_ENGINE == SE_BMS
-	sharesys->AddInterface(myself, &g_ClientEntityManager);
-#endif
 	
 	gNatives.reserve(1000);
 	natives::setup(gNatives);
 	gNatives.push_back({nullptr, nullptr});
 	sharesys->AddNatives(myself, gNatives.data());
+	CBaseNPCPublishInterfaces();
 
 	g_pSM->LogMessage(myself, "Registered %d natives.", gNatives.size() - 1);
 
@@ -379,7 +378,11 @@ void CBaseNPCExt::SDK_OnAllLoaded() {
 void CBaseNPCExt::SDK_OnAllPluginsLoaded()
 {
 	char error[512];
-	if (!g_CBaseNPCNetworkSchemaManager.Finalize(error, sizeof(error)))
+	const bool success = g_CBaseNPCNetworkSchemaManager.Finalize(error, sizeof(error));
+	sp::CallArgs args;
+	args.PushCell(success);
+	CBaseNPCDispatchForward("OnCBaseNPCNetworkSchemaFinalized", args);
+	if (!success)
 	{
 		g_pSM->LogError(myself, "Failed to finalize CBaseNPC network classes: %s", error);
 		if (g_CBaseNPCNetworkSchemaManager.IsPublished())
@@ -420,6 +423,7 @@ void CBaseNPCExt::NotifyInterfaceDrop(SMInterface* interface) {
 
 void CBaseNPCExt::SDK_OnUnload()
 {
+	CBaseNPCShutdownInterfaces();
 	if (g_CBaseNPCNetworkSchemaManager.IsPublished()) {
 		// IExtensionInterface has no unload veto. Do not invalidate the engine's
 		// schema/proxy/thunk pointers or revert its public lists during teardown.
@@ -564,6 +568,7 @@ bool CBaseNPCExt::Initialize(char* error, size_t maxlength, datamap_t* const* da
 	g_pBaseNPCFactory = new CBaseNPCFactory;
 
 	m_bInitialized = true;
+	CBaseNPCDispatchForward("OnCBaseNPCInitialized", sp::CallArgs());
 
 	return true;
 }

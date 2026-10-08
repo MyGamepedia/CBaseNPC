@@ -316,7 +316,8 @@ cell_t SetType(IPluginContext* context, const cell_t* params) {
 
 	char* type = nullptr;
 	context->LocalToString(params[2], &type);
-	memcpy(npc->m_type, type, 64); // Not sure if this is ideal
+	// Native input may be a short frame-local string, not a 64-byte buffer.
+	snprintf(npc->m_type, sizeof(npc->m_type), "%s", type);
 	return 0;
 }
 

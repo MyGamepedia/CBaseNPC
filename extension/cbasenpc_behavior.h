@@ -5,8 +5,10 @@
 #include "NextBotBehavior.h"
 #include "cbasenpc_internal.h"
 #include "idatamapcontainer.h"
+#include "actionreasons.h"
 
 #include <sh_stack.h>
+#include <set>
 
 class CBaseNPCPluginActionFactory;
 class CBaseNPCPluginActionFactories;
@@ -21,15 +23,16 @@ class CBaseNPCPluginAction : public Action <INextBot>
 public:
 	
 private:
-	ActionResult< INextBot > m_pluginActionResult;
-	EventDesiredResult< INextBot > m_pluginEventResult;
+	using ActionCallbackFrame = CBaseNPCActionResultFrame<ActionResult<INextBot>>;
+	using EventCallbackFrame = CBaseNPCActionResultFrame<EventDesiredResult<INextBot>>;
+	ActionCallbackFrame* m_actionCallback = nullptr;
+	EventCallbackFrame* m_eventCallback = nullptr;
+	CBaseNPCActionReasons m_returnedActionReason;
+	CBaseNPCActionReasons m_returnedEventReason;
 
 	void * m_pData;
 
 	CBaseNPCPluginActionFactory * m_pFactory;
-
-	bool m_bInActionCallback;
-	int m_inEventCallback;
 
 public:
     CBaseNPCPluginAction(CBaseNPCPluginActionFactory * pFactory);
@@ -41,14 +44,13 @@ public:
 
 	CBaseNPCPluginActionFactory * GetFactory() const { return m_pFactory; };
 
-	void ResetPluginActionResult();
 	void PluginContinue();
 	void PluginChangeTo( Action< INextBot > *action, const char *reason );
 	void PluginSuspendFor( Action< INextBot > *action, const char *reason );
 	void PluginDone( const char *reason );
 
-	bool IsInActionCallback() const { return m_bInActionCallback; }
-	bool IsInEventCallback() const { return m_inEventCallback > 0; }
+	bool IsInActionCallback() const { return m_actionCallback != nullptr; }
+	bool IsInEventCallback() const { return m_eventCallback != nullptr; }
 
 	virtual ActionResult< INextBot > OnStart( INextBot *me, Action< INextBot > *prevAction ) override final;
 	virtual ActionResult< INextBot > Update( INextBot *me, float interval ) override final;
@@ -72,7 +74,6 @@ public:
 															   const CKnownEntity *threat1, 
 															   const CKnownEntity *threat2 ) const override final;
 
-	void ResetPluginEventResult();
 	void PluginTryContinue( EventResultPriorityType priority );
 	void PluginTryChangeTo( Action< INextBot > *action, EventResultPriorityType priority, const char *reason );
 	void PluginTrySuspendFor( Action< INextBot > *action, EventResultPriorityType priority, const char *reason );
@@ -135,10 +136,12 @@ public:
 
 	void InitBehavior();
 	void DestroyBehavior();
+	bool UsesActionFactory(const CBaseNPCPluginActionFactory* factory) const;
 
 
 private:
 	Behavior< INextBot > * m_pBehavior;
+	bool m_bResetting = false;
 };
 
 class CBaseNPCPluginActionFactories : public IHandleTypeDispatch
@@ -157,15 +160,21 @@ public:
 	CBaseNPCPluginActionFactory* GetFactoryFromHandle( Handle_t handle, HandleError *err = nullptr );
 	void OnFactoryCreated( CBaseNPCPluginActionFactory* pFactory );
 	void OnFactoryDestroyed( CBaseNPCPluginActionFactory* pFactory );
+	void OnIntentionCreated(CBaseNPCIntention* intention);
+	void OnIntentionDestroyed(CBaseNPCIntention* intention);
+	void ResetIntentionsUsingFactory(CBaseNPCPluginActionFactory* factory);
+	void DetachPendingAction(Action<INextBot>* action);
 
 private:
 	HandleType_t m_FactoryType;
 
 	CUtlVector< CBaseNPCPluginActionFactory* > m_Factories;
+	std::set<CBaseNPCIntention*> m_Intentions;
 };
 
 class CBaseNPCPluginActionFactory : public IDataMapContainer
 {
+	friend class CBaseNPCPluginActionFactories;
 public:
 	enum CallbackType
 	{
@@ -250,7 +259,7 @@ private:
 public:
 	Handle_t m_Handle;
 
-	CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName );
+	CBaseNPCPluginActionFactory( IPlugin* plugin, const char* actionName, IdentityToken_t* owner=nullptr );
 	virtual ~CBaseNPCPluginActionFactory();
 
 	virtual int GetDataDescOffset() const override final { return 0; }
@@ -259,6 +268,8 @@ public:
 	size_t GetActionDataSize() const { return GetDataDescSize(); }
 
 	const char* GetName() const { return m_iActionName.c_str(); }
+	bool IsDestroying() const { return m_bDestroying; }
+	bool IsUsedBy(const Behavior<INextBot>* behavior) const;
 	void SetName( const char* name ) { m_iActionName = name; }
 
 	IPluginFunction* GetCallback(CallbackType cbType);

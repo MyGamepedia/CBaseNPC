@@ -7,11 +7,12 @@ namespace factory {
 
 inline CBaseNPCPluginActionFactory* Get(IPluginContext* context, const cell_t param) {
 	HandleSecurity security;
-	security.pOwner = nullptr;
+	security.pOwner = context->GetIdentity();
 	security.pIdentity = myself->GetIdentity();
 	Handle_t hndlObject = static_cast<Handle_t>(param);
 	CBaseNPCPluginActionFactory* factory = nullptr;
 	READHANDLE(hndlObject, BaseNPCPluginActionFactory, factory);
+	CBaseNPCCheckNativeHandleAccess(context, factory, true);
 	return factory;
 }
 
@@ -39,9 +40,10 @@ cell_t NextBotActionFactory_Ctor(IPluginContext* context, const cell_t* params) 
 		return context->ThrowNativeError("Action must have a name");
 	}
 	
-	IPlugin* plugin = plsys->FindPluginByContext(context);
-	CBaseNPCPluginActionFactory* factory = new CBaseNPCPluginActionFactory(plugin, name);
-	return factory->m_Handle;
+	IPlugin* plugin = CBaseNPCGetOwningPlugin(context);
+	CBaseNPCPluginActionFactory* factory = new CBaseNPCPluginActionFactory(plugin, name, context->GetIdentity());
+	if (!factory->m_Handle) { delete factory; return context->ThrowNativeError("Could not create action factory handle"); }
+	return CBaseNPCTrackNativeHandle(context, factory->m_Handle);
 }
 
 cell_t SetCallback(IPluginContext* context, const cell_t* params) {

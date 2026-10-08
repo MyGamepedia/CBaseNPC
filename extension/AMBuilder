@@ -4,6 +4,8 @@ import os, sys
 project = builder.LibraryProject('cbasenpc.ext')
 project.sources = [
   'extension.cpp',
+  'cbasenpcinterfaces.cpp',
+  'nativecontext.cpp',
   'cbasenpc_behavior.cpp',
   'cbasenpc_internal.cpp',
   'cbasenpc_locomotion.cpp',
